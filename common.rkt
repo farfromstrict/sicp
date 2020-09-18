@@ -36,3 +36,13 @@
   (if (equal? x y)
     (printf "[   OK] ~a == ~a\n" x y)
     (printf "[ERROR] ~a != ~a\n" x y)))
+
+(define (assert-close-enough x y [t 1e-3])
+  (define (diff-ratio a b)
+    (if (= a b)
+        0
+        (/ (abs (- a b)) (/ (+ a b) 2))))
+  (let ([dr (diff-ratio x y)])
+    (if (< dr t)
+      (printf "[   OK] ~a ~~= ~a (~a)\n" x y dr)
+      (printf "[ERROR] ~a != ~a (~a)\n" x y dr))))
