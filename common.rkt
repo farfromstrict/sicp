@@ -46,3 +46,8 @@
     (if (< dr t)
       (printf "[   OK] ~a ~~= ~a (~a)\n" x y dr)
       (printf "[ERROR] ~a != ~a (~a)\n" x y dr))))
+
+(define-syntax handle-error
+  (syntax-rules ()
+    [(_ b1 b2 ...)
+     (with-handlers ([(lambda (v) #t) (lambda (v) (exn-message v))]) b1 b2 ...)]))
