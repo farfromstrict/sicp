@@ -12,6 +12,8 @@
       [else (mcons (car lst) (rec (cdr lst)))]))
   (rec w))
 
+(define square sqr)
+
 
 ;;; common tools
 (define (average a . w)
@@ -47,7 +49,9 @@
       (printf "[   OK] ~a ~~= ~a (~a)\n" x y dr)
       (printf "[ERROR] ~a != ~a (~a)\n" x y dr))))
 
-(define-syntax handle-error
+
+; syntax extensions
+(define-syntax display-error
   (syntax-rules ()
     [(_ b1 b2 ...)
      (with-handlers ([(lambda (v) #t) (lambda (v) (exn-message v))]) b1 b2 ...)]))
