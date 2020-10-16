@@ -19,6 +19,24 @@
 (define (average a . w)
   (/ (apply + (cons a w)) (+ (length w) 1)))
 
+(define (list->stream lst)
+  (if (null? lst)
+    empty-stream
+    (stream-cons (car lst) (list->stream (cdr lst)))))
+
+(define (stream->flist s n)
+  (cond
+    [(stream-null? s) '()]
+    [(= n 0) '()]
+    [else
+      (cons
+        (stream-first s)
+        (stream->flist (stream-rest s) (- n 1)))]))
+
+(define stream-car stream-first)
+(define stream-cdr stream-rest)
+(define stream-null? stream-empty?)
+
 (define (mprintln . w)
   (map displayln w)
   (printf ""))

@@ -1618,6 +1618,9 @@ x
                 result-list)))))
   (copy-to-list tree '()))
 
+; The two implementations have the same complexity,
+; which might be O(N*logN)
+
 (define t1 '(7 (3 (1 () ()) (5 () ())) (9 () (11 () ()))))
 (define t2 '(3 (1 () ()) (7 (5 () ()) (9 () (11 () ())))))
 (define t3 '(5 (3 (1 () ()) ()) (9 (7 () ()) (11 () ()))))
@@ -1767,3 +1770,234 @@ x
 (lookup 10 s1)  ; => #f
 )
 ))
+
+
+;;; 2.67 ~ 2.72
+((lambda ()
+(define (make-leaf symbol weight) (list 'leaf symbol weight))
+(define (leaf? obj) (eqv? 'leaf (car obj)))
+(define (symbol-leaf obj) (cadr obj))
+(define (weight-leaf obj) (caddr obj))
+
+(define (make-code-tree left right)
+  (list
+    left
+    right
+    (append (symbols left) (symbols right))
+    (+ (weight left) (weight right))))
+
+(define (left-branch tree) (car tree))
+(define (right-branch tree) (cadr tree))
+
+(define (symbols tree)
+  (if (leaf? tree)
+      (list (symbol-leaf tree))
+      (caddr tree)))
+
+(define (weight tree)
+  (if (leaf? tree)
+      (weight-leaf tree)
+      (cadddr tree)))
+
+(define (choose-branch bit tree)
+  (cond
+    [(= bit 0) (left-branch tree)]
+    [(= bit 1) (right-branch tree)]
+    [else (error 'choose-branch "bad bit" bit)]))
+
+(define (decode bits tree)
+  (define (decode-inner bits current-branch)
+    (if (null? bits)
+      '()
+      (let ([next-branch (choose-branch (car bits) current-branch)])
+        (if (leaf? next-branch)
+          (cons (symbol-leaf next-branch)
+                (decode-inner (cdr bits) tree))
+          (decode-inner (cdr bits) next-branch)))))
+  (decode-inner bits tree))
+
+(define (encode-symbol symbol tree)
+  (if (leaf? tree)
+    '()
+    (let ([lb (left-branch tree)] [rb (right-branch tree)])
+      (cond
+        [(memv symbol (symbols lb)) (cons 0 (encode-symbol symbol lb))]
+        [(memv symbol (symbols rb)) (cons 1 (encode-symbol symbol rb))]
+        [else (error 'encode-symbol "bad symbol" symbol)]))))
+
+(define (encode message tree)
+  (if (null? message)
+      '()
+      (append (encode-symbol (car message) tree)
+            (encode (cdr message) tree))))
+
+(define sample-tree
+  (make-code-tree 
+    (make-leaf 'A 4)
+    (make-code-tree
+      (make-leaf 'B 2)
+      (make-code-tree 
+        (make-leaf 'D 1)
+        (make-leaf 'C 1)))))
+
+; A => 0
+; B => 10
+; C => 111
+; D => 110
+
+(define sample-bits '(0 1 1 0 0 1 0 1 0 1 1 1 0))
+
+(define sample-message '(A D A B B C A))
+
+(mlog "ex-2.67"
+(decode sample-bits sample-tree)  ; => ADABBCA
+)
+
+(mlog "ex-2.68"
+(encode sample-message sample-tree)  ; => 0110010101110
+)
+
+(define (adjoin-set x set)
+  (cond
+    [(null? set) (list x)]
+    [(< (weight x) (weight (car set))) (cons x set)]
+    [else (cons (car set) (adjoin-set x (cdr set)))]))
+
+(define (make-leaf-set pairs)
+  (if (null? pairs)
+    '()
+    (let ([pair (car pairs)])
+      (adjoin-set
+        (make-leaf (car pair) (cadr pair))
+        (make-leaf-set (cdr pairs))))))
+
+(define (successive-merge set)
+  (if (null? (cdr set))
+    (car set)
+    (successive-merge
+      (adjoin-set
+        (make-code-tree (car set) (cadr set))
+        (cddr set)))))
+
+(define (generate-huffman-tree pairs)
+  (successive-merge (make-leaf-set pairs)))
+
+(define pairs '((A 4) (B 2) (D 1) (C 1)))
+(define htree1 (generate-huffman-tree pairs))
+
+(mlog "ex-2.69"
+htree1
+sample-message
+(encode sample-message htree1)
+(decode (encode sample-message htree1) htree1)
+)
+
+(define rock-pairs '((a 2) (na 16) (boom 1) (sha 3) (get 2) (yip 9) (job 2) (wah 1)))
+
+(define song '(get a job sha na na na na na na na na get a job sha na na na na na na na na wah yip yip yip yip yip yip yip yip yip sha boom))
+
+(define rock-tree (generate-huffman-tree rock-pairs))
+
+(define song-code (encode song rock-tree))
+(define song-msg (decode song-code rock-tree))
+
+(mlog "ex-2.70"
+song-code
+(length song-code)
+(* 3 (length song))
+(equal? song song-msg)
+)
+
+(define pairs1 '((A 1) (B 2) (C 4) (D 8) (E 16)))
+(define htree2 (generate-huffman-tree pairs1))
+
+(mlog "ex-2.71"
+htree2
+(encode '(A) htree2)
+(encode '(E) htree2)
+; for n, most frequent => 1, least frequent => (n - 1)
+)
+
+(mlog "ex-2.72")
+))
+
+
+;;; 2.73
+((lambda ()
+(define (operator exp) (car exp))
+(define (operands exp) (cdr exp))
+
+(define (deriv-rule-sum operands var)
+  (cons '+ (map (lambda (el) (deriv el var)) operands)))
+
+(define (deriv-rule-product operands var)
+  (if (null? (cdr operands))
+    (deriv (car operands) var)
+    (list
+      '+
+      (append (list '* (deriv (car operands) var)) (cdr operands))
+      (list '* (car operands) (deriv-rule-product (cdr operands) var)))))
+
+(define (deriv exp var)
+  (cond
+    [(number? exp) 0]
+    [(variable? exp)
+      (if (same-variable? exp var) 1 0)]
+    [else
+      ((get 'deriv (operator exp)) (operands exp) var)]))
+
+(define deriv-rules '())
+
+(define (put tag op rule)
+  (set! deriv-rules (cons (list op rule) deriv-rules)))
+
+(define (get tag op)
+  (define (iter rules)
+    (cond
+      [(null? rules) #f]
+      [(eqv? op (caar rules)) (cadr (car rules))]
+      [else (iter (cdr rules))]))
+  (iter deriv-rules))
+
+(define (make-deriv-rules)
+  (put 'deriv '+ deriv-rule-sum)
+  (put 'deriv '* deriv-rule-product))
+
+(make-deriv-rules)
+
+(mlog "ex-2.73"
+(deriv '(+ x y x) 'x)
+(deriv '(* x y x) 'x)
+)
+))
+
+
+;;; 2.74
+; ignored
+
+
+;;; 2.75
+((lambda ()
+(define (make-from-mag-ang m a)
+  (define (dispatch op)
+    (cond
+      [(eqv? op 'real-part) (* m (cos a))]
+      [(eqv? op 'imag-part) (* m (sin a))]
+      [(eqv? op 'magnitude) m]
+      [(eqv? op 'angle) a]
+      [else (error 'make-from-mag-ang "unknown operation" op)]))
+  dispatch)
+
+(define x (make-from-mag-ang 10 (/ pi 4)))
+
+(mlog "ex-2.75"
+(x 'real-part)
+(x 'imag-part)
+(x 'magnitude)
+(x 'angle)
+)
+))
+
+
+;;; 2.76
+; ignored
