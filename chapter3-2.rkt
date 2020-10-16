@@ -39,7 +39,7 @@
       (add-streams ps (stream-cdr s))))
   ps)
 
-#|
+
 ;;; 3.50
 ((lambda ()
 (define s1 (stream-cons 1 s1))
@@ -833,7 +833,6 @@
   (stream->flist (cdr rst) 10)
 )
 ))
-|#
 
 
 ;;; 3.81
