@@ -1,75 +1,106 @@
-#lang sicp
-(#%require racket)
-(#%require sicp-pict)
+#lang racket
+(require (for-syntax syntax/parse racket/path))
 
-(provide (all-defined-out))
+(provide ex ?== ?=== ?~= ?true ?false
+         @>> @update @update!
+         average int/list)
 
-;;; built-in procedures
-(define (mlist . w)
-  (define (rec lst)
-    (cond
-      [(null? lst) empty]
-      [else (mcons (car lst) (rec (cdr lst)))]))
-  (rec w))
+(define-syntax (ex stx)
+  (syntax-parse stx
+    [(_ ex-id outer-expr ... (~literal ------) inner-expr ...)
+     #'(begin
+         outer-expr ...
+         (printf "---------- ex ~a ----------\n" ex-id)
+         (let () inner-expr ... (void))
+         (printf "----------------------------\n\n"))]
+    [(_ ex-id expr ...)
+     #'(begin
+         (printf "---------- ex ~a ----------\n" ex-id)
+         (let () expr ... (void))
+         (printf "----------------------------\n\n"))]
+    [_ #'(void)]))
 
-(define square sqr)
+(define-for-syntax (check-helper stx pred? aexpr eexpr)
+  (with-syntax ([stx-file (path->string (file-name-from-path (syntax-source stx)))]
+                [stx-line (syntax-line stx)]
+                [stx-col (syntax-column stx)])
+    #`(let* ([av #,aexpr]
+             [ev #,eexpr]
+             [result (#,pred? av ev)]
+             [status-str (if result "SUCCESS" "FAILURE")]
+             [loc-str (format "~a:~a:~a" stx-file stx-line stx-col)]
+             [comp-str (if result "==" "!=")])
+        (printf "[~a][~a] ~a ~a ~a\n" status-str loc-str #,aexpr comp-str #,eexpr))))
+
+(define-syntax (?== stx)
+  (syntax-parse stx
+    [(_ aexpr eexpr)
+     (check-helper stx equal? #'aexpr #'eexpr)]
+    [_ #'(void)]))
+
+(define-syntax (?=== stx)
+  (syntax-parse stx
+    [(_ aexpr eexpr)
+     (check-helper stx eqv? #'aexpr #'eexpr)]
+    [_ #'(void)]))
+
+(define-syntax (?~= stx)
+  (syntax-parse stx
+    [(_ aexpr eexpr tolerance)
+     (check-helper
+        stx
+        #'(lambda (v1 v2)
+            (< (abs (- v1 v2))
+               tolerance))
+        #'aexpr
+        #'eexpr)]
+    [_ #'(void)]))
+
+(define-syntax (?true stx)
+  (syntax-parse stx
+    [(_ expr)
+     (check-helper stx equal? #'expr #t)]
+    [_ #'(void)]))
+
+(define-syntax (?false stx)
+  (syntax-parse stx
+    [(_ expr)
+     (check-helper stx equal? #'expr #f)]
+    [_ #'(void)]))
+
+(define-syntax (@>> stx)
+  (syntax-parse stx
+    [(_ expr)
+     #'(printf "~a\n" expr)]
+    [_ #'(void)]))
+
+(define-syntax (@update! stx)
+  (syntax-parse stx
+    [(_ ([proc-id:id new-expr] ...) body ...)
+     #'(begin
+         (set! proc-id new-expr) ...
+         body ...)]))
+
+(define-syntax (@update stx)
+  (syntax-parse stx
+    [(_ ([proc-id:id new-expr] ...) body ...)
+     #'(begin
+         (define stashs (list proc-id ...))
+         (set! proc-id new-expr) ...
+         body ...
+         (define idx 0)
+         (begin
+           (set! proc-id (list-ref stashs idx))
+           (set! idx (+ idx 1))) ...)]))
 
 
-;;; common tools
-(define (average a . w)
-  (/ (apply + (cons a w)) (+ (length w) 1)))
+(define (average e . w)
+  (let ([sum (+ e (apply + w))]
+        [cnt (+ 1 (length w))])
+    (/ sum cnt)))
 
-(define (list->stream lst)
-  (if (null? lst)
-    empty-stream
-    (stream-cons (car lst) (list->stream (cdr lst)))))
-
-(define (stream->flist s n)
-  (cond
-    [(stream-null? s) '()]
-    [(= n 0) '()]
-    [else
-      (cons
-        (stream-first s)
-        (stream->flist (stream-rest s) (- n 1)))]))
-
-(define stream-car stream-first)
-(define stream-cdr stream-rest)
-(define stream-null? stream-empty?)
-
-(define (mprintln . w)
-  (map displayln w)
-  (printf ""))
-
-(define (hlog idx)
-  (printf "[~a]\n----------\n" idx))
-
-(define (tlog)
-  (printf "----------\n\n"))
-
-(define (mlog idx . w)
-  (hlog idx)
-  (map displayln w)
-  (tlog))
-
-(define (assert x y)
-  (if (equal? x y)
-    (printf "[   OK] ~a == ~a\n" x y)
-    (printf "[ERROR] ~a != ~a\n" x y)))
-
-(define (assert-close-enough x y [t 1e-3])
-  (define (diff-ratio a b)
-    (if (= a b)
-        0
-        (/ (abs (- a b)) (/ (+ a b) 2))))
-  (let ([dr (diff-ratio x y)])
-    (if (< dr t)
-      (printf "[   OK] ~a ~~= ~a (~a)\n" x y dr)
-      (printf "[ERROR] ~a != ~a (~a)\n" x y dr))))
-
-
-; syntax extensions
-(define-syntax display-error
-  (syntax-rules ()
-    [(_ b1 b2 ...)
-     (with-handlers ([(lambda (v) #t) (lambda (v) (exn-message v))]) b1 b2 ...)]))
+(define (int/list low high [step 1])
+  (let loop ([n low] [rst '()])
+    (if (> n high)
+        (reverse rst)
+        (loop (+ n step) (cons n rst)))))
