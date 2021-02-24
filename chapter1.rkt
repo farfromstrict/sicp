@@ -4,7 +4,7 @@
 
 
 ;; ex 1.1
-(ex "1.1"
+(ex 1
 (?== 10 10)
 (?== 12 (+ 5 3 4))
 (?== 8 (- 9 1))
@@ -31,14 +31,15 @@
 
 
 ;;; ex 1.2
-(ex "1.2"
-(@>> (/ (+ 5 4 (- 2 (- 3 (+ 6 (/ 4 5)))))
+(ex 2
+(?== -37/150
+     (/ (+ 5 4 (- 2 (- 3 (+ 6 (/ 4 5)))))
         (* 3 (- 6 2) (- 2 7))))
 )
 
 
 ;;; ex 1.3
-(ex "1.3"
+(ex 3
 (define (sum-of-bigger-num a b c)
   (cond
     [(>= a b)
@@ -60,7 +61,7 @@
 
 
 ;;; ex 1.4
-(ex "1.4"
+(ex 4
 (define (a-plus-abs-b a b)
   ((if (> b 0) + -) a b))
 
@@ -70,7 +71,7 @@
 
 
 ;;; ex 1.5
-(ex "1.5"
+(ex 5
 (define (p) (p))  ; 无限循环
 
 (define (test x y)
@@ -83,7 +84,7 @@
 
 
 ;;; ex 1.6
-(ex "1.6"
+(ex 6
 (define (new-if predicate then-clause else-clause)
   (cond
     [predicate then-clause]
@@ -91,83 +92,77 @@
 ; new-if 是普通 procedure, 在应用序下, predicate & then-clause & else-clause 都会被先求值
 ; 这会造成资源浪费, 甚至进入死循环
 
-(define (foo1) (printf "foo1\n") 1)
-(define (foo2) (printf "foo2\n") 2)
-(@>> (new-if #t (foo1) (foo2)))
+(define lst '())
+(define (foo1) (set! lst (cons 1 lst)) 1)
+(define (foo2) (set! lst (cons 2 lst)) 2)
+
+(?== 1 (new-if #t (foo1) (foo2)))
+(?== '(2 1) lst)
 )
 
 
-(define threshold 1e-5)
+
+;;; ex 1.7
+(ex 7
+(define tolerance 1e-6)
+
+(define (good-enough? guess x)
+  (< (abs (- (sqr guess) x)) tolerance))
+
+(define (close-enough? v1 v2)
+  (< (diff-ratio v1 v2) tolerance))
+------
+(define (improve guess x)
+  (average guess (/ x guess)))
 
 (define (sqrt-iter guess x)
   (if (good-enough? guess x)
       guess
       (sqrt-iter (improve guess x) x)))
 
-(define (improve guess x)
-  (average guess (/ x guess)))
-
-(define (good-enough? guess x)
-  (< (abs (- (sqr guess) x)) threshold))
-
 (define (sqrt x) (sqrt-iter 1.0 x))
 
-(define (diff-ratio a b)
-  (if (and (= a 0) (= b 0))
-      0
-      (/ (abs (- a b))
-         (/ (+ a b) 2))))
-
-
-;;; ex 1.7
-(ex "1.7"
-(define (verify x [rst #t])
+(define (verify x tolerance [rst #t])
   (let* ([root (sqrt x)]
          [sqr-root (sqr root)]
          [ratio (diff-ratio sqr-root x)])
     (printf "sqrt(~a) = ~a\n" x root)
-    (?== (< ratio threshold) rst)))
+    (printf "sqr(~a) = ~a (~a)\n" root sqr-root ratio)
+    (?== rst (< ratio tolerance))))
 
-(verify 1e-6 #f)
+(verify 1e-6 tolerance #f)
 ;(verify 1e100)  ; 效率极低
 
 (define (sqrt-iter/v2 guess x)
   (let ([new-guess (improve guess x)])
-    (if (good-enough?/v2 guess new-guess)
-        guess
+    (if (close-enough? guess new-guess)
+        new-guess
         (sqrt-iter/v2 new-guess x))))
 
-(define (good-enough?/v2 guess new-guess)
-  (< (diff-ratio guess new-guess) threshold))
-
-(@update! ([good-enough? good-enough?/v2]
-           [sqrt-iter sqrt-iter/v2]))
-
-(verify 1e-6)
-(verify 1e100)
+(@update ([sqrt-iter sqrt-iter/v2])
+  (verify 1e-6 tolerance)
+  (verify 1e100 tolerance))
 )
 
 
 ;;; ex 1.8
-(ex "1.8"
+(ex 8
 (define (cubic-root x)
   (define (improve y)
     (/ (+ (/ x (* y y))
           (* 2 y))
        3))
-  (define (cubic-root-iter guess)
-    (let ([new-guess (improve guess)])
-      (if (good-enough? guess new-guess)
-          guess
-          (cubic-root-iter new-guess))))
-  (cubic-root-iter 1.0))
+  (let loop ([guess 1.0])
+    (let ([next (improve guess)])
+      (if (close-enough? next guess)
+          next
+          (loop next)))))
 
 (define (verify x)
   (let* ([root (cubic-root x)]
-         [cubic (* root root root)]
-         [ratio (diff-ratio cubic x)])
-    (printf "cubic-root(~a) = ~a\n" x root)
-    (?true (< ratio threshold))))
+         [cubic (* root root root)])
+    (printf "cubrt(~a) = ~a\n" x root)
+    (?~=% x cubic tolerance)))
 
 (verify 1e-6)
 (verify 1e100)
@@ -175,7 +170,7 @@
 
 
 ;;; ex 1.9
-(ex "1.9"
+(ex 9
 (let ()
   (define (+ a b)
     (if (= a 0)
@@ -213,7 +208,7 @@
 
 
 ;;; ex 1.10
-(ex "1.10"
+(ex 10
 (define (A x y)
   (cond [(= y 0) 0]
         [(= x 0) (* 2 y)]
@@ -240,7 +235,7 @@
 
 
 ;;; ex 1.11
-(ex "1.11"
+(ex 11
 (define (fn-rec n)
   (cond
     [(< n 3) n]
@@ -265,7 +260,7 @@
 
 
 ;;; ex 1.12
-(ex "1.12"
+(ex 12
 (define (pascal-value row col)
   (cond
     [(or (= row 1) (= col 1)) 1]
@@ -287,10 +282,10 @@
 
 
 ;;; ex 1.13
-(ex "1.13"
+(ex 13
 (define phi (/ (+ 1 (sqrt 5)) 2))
 (define eta (/ (- 1 (sqrt 5)) 2))
-
+------
 (define (fib-iter n)
   (let loop ([m 1] [a1 1] [a2 1])
     (cond
@@ -327,11 +322,11 @@
 
 
 ;;; ex 1.14
-(ex "1.14")
+(ex 14)
 
 
 ;;; ex 1.15
-(ex "1.15"
+(ex 15
 (define (sine angle)
   (define (cube x) (* x x x))
   (define (p x) (- (* 3 x) (* 4 (cube x))))
@@ -342,8 +337,7 @@
       angle
       (p (sine (/ angle 3.0)))))
 
-(@>> (sin 12.15))
-(@>> (sine 12.15))
+(?~=% (sine 12.15) (sin 12.15) 0.02)
 ; (sine 12.15)
 ; (p (sine 4.05))
 ; (p (p (sine 1.35)))
@@ -358,7 +352,7 @@
 
 
 ;;; ex 1.16
-(ex "1.16"
+(ex 16
 (define (fast-expt b n)
   (let loop ([b b] [n n] [rst 1])
     (cond
@@ -371,11 +365,11 @@
 )
 
 
+;;; ex 1.17
+(ex 17
 (define (double x) (arithmetic-shift x 1))
 (define (halve x) (arithmetic-shift x -1))
-
-;;; ex 1.17
-(ex "1.17"
+------
 (define (fast-multiple-rec a b)
   (cond
     [(= b 0) 0]
@@ -389,14 +383,13 @@
     (printf "~a * ~a = ~a\n" a b rst)
     (?== rst (* a b))))
 
-(verify)
-(verify)
-(verify)
+(for/list ([i (int/list 1 3)])
+  (verify))
 )
 
-;;; ex 1.18
-(ex "1.18"
 
+;;; ex 1.18
+(ex 18
 (define (fast-multiple a b)
   (let loop ([a a] [b b] [rst 0])
     (cond
@@ -411,14 +404,13 @@
     (printf "~a * ~a = ~a\n" a b rst)
     (?== rst (* a b))))
 
-(verify)
-(verify)
-(verify)
+(for/list ([i (int/list 1 3)])
+  (verify))
 )
 
 
 ;;; ex 1.19
-(ex "1.19"
+(ex 19
 (define (fib n)
   (fib-iter 1 0 0 1 n))
 
@@ -448,7 +440,7 @@
 
 
 ;;; ex 1.20
-(ex "1.20"
+(ex 20
 (define count 0)
 
 (define (remainder/v2 a b)
@@ -477,11 +469,13 @@
 ; [count=4] (gcd 2 0)
 ; [count=4] 2
 
-(@>> (gcd 206 40))
+(?== 2 (gcd 206 40))
 (?== 4 count)
 )
 
 
+;;; ex 1.21
+(ex 21
 (define (divides? a b) (= (remainder b a) 0))
 
 (define (smallest-divisor n)
@@ -493,15 +487,15 @@
   (find-divisor 2))
 
 (define (prime? n) (= (smallest-divisor n) n))
-
-;;; ex 1.21
-(ex "1.21"
+------
 (?== (smallest-divisor 199) 199)
 (?== (smallest-divisor 1999) 1999)
 (?== (smallest-divisor 19999) 7)
 )
 
 
+;;; ex 1.22
+(ex 22
 (define (timed-prime? n)
   (define (start-prime-test n start-time)
     (cond
@@ -517,9 +511,7 @@
      (cond
        [(timed-prime? start) (search-for-primes (inc start) (dec count))]
        [else (search-for-primes (inc start) count)])]))
-
-;;; ex 1.22
-(ex "1.22"
+------
 (search-for-primes 1000 3)
 (search-for-primes 10000 3)
 (search-for-primes 100000 3)
@@ -529,7 +521,7 @@
 
 
 ;;; ex 1.23
-(ex "1.23"
+(ex 23
 (define (smallest-divisor/v2 n)
   (define (next test-divisor)
     (if (= test-divisor 2) 3 (+ test-divisor 2)))
@@ -547,6 +539,8 @@
 )
 
 
+;;; ex 1.24
+(ex 24
 (define (expmod base exp m)
   (cond
     [(= exp 0) 1]
@@ -566,9 +560,7 @@
     [(fermat-test n)
      (fast-prime? n (dec times))]
     [else #f]))
-
-;;; ex 1.24
-(ex "1.24"
+------
 (define (prime/v2? n) (fast-prime? n 10))
 
 (@update ([prime? prime/v2?])
@@ -579,21 +571,21 @@
 
 
 ;;; ex 1.25
-(ex "1.25"
+(ex 25
 ; 这一方式不合适: 直接计算乘幂可能会产生极大的数, 带来性能或存储精度问题
 )
 
 
 ;;; ex 1.26
-(ex "1.26"
+(ex 26
 ; expmod 计算量加倍
 )
 
 
-(define carmichael-numbers (list 561 1105 1729 2465 2821 6601))
-
 ;;; ex 1.27
-(ex "1.27"
+(ex 27
+(define carmichael-numbers (list 561 1105 1729 2465 2821 6601))
+------
 (?== 3 (smallest-divisor 561))
 (?== 5 (smallest-divisor 1105))
 (?== 7 (smallest-divisor 1729))
@@ -616,7 +608,7 @@
 
 
 ;;; ex 1.28
-(ex "1.28"
+(ex 28
 (define (expmod/v2 base exp m)
   (cond
     [(= exp 0) 1]
@@ -652,6 +644,9 @@
   (?false (prime? n)))
 )
 
+
+;;; ex 1.29
+(ex 29
 (define (sum term a next b)
   (if (> a b)
       0
@@ -662,9 +657,7 @@
   (define (add-dx x) (+ x dx))
   (* (sum f (+ a (/ dx 2.0)) add-dx b) 
      dx))
-
-;;; ex 1.29
-(ex "1.29"
+------
 (define (cube x) (* x x x))
 
 (define (simpson-integral f a b n)
@@ -678,15 +671,15 @@
   (* (/ h 3)
      (sum (lambda (k) (* (c k) (y k))) 0 inc n)))
 
-(@>> (integral cube 0 1 0.01))
-(@>> (integral cube 0 1 0.001))
-(@>> (simpson-integral cube 0 1.0 100))
-(@>> (simpson-integral cube 0 1.0 1000))
+(?~=% 0.25 (integral cube 0 1 0.01) 1e-4)
+(?~=% 0.25 (integral cube 0 1 0.001) 1e-6)
+(?~=% 0.25 (simpson-integral cube 0 1.0 100) 0.02)
+(?~=% 0.25 (simpson-integral cube 0 1.0 1000) 0.002)
 )
 
 
 ;;; ex 1.30
-(ex "1.30"
+(ex 30
 (define (sum term a next b)
   (define (iter a result)
     (if (> a b)
@@ -699,7 +692,7 @@
 
 
 ;;; ex 1.31
-(ex "1.31"
+(ex 31
 (define (product/rec term a next b)
   (if (> a b)
       1
@@ -728,12 +721,12 @@
   (* 4.0
      (product term 1 inc n)))
 
-(@>> (pi-estimate 1000))
+(?~=% 3.14159 (pi-estimate 1000) 0.001)
 )
 
 
 ;;; 1.32
-(ex "1.32"
+(ex 32
 (define (accumulate/rec combiner null-value term a next b)
   (if (> a b)
       null-value
@@ -760,7 +753,7 @@
 
 
 ;;; 1.33
-(ex "1.33"
+(ex 33
 (define (filtered-accumulate pred? combiner null-value term a next b)
   (let loop ([a a] [result null-value])
     (cond
@@ -785,7 +778,7 @@
 
 
 ;;; 1.34
-(ex "1.34"
+(ex 34
 (define (f g) (g 2))
 ; (f f)
 
@@ -795,12 +788,8 @@
 )
 
 
-(define (close-enough? v1 v2)
-  (define tolerance 1e-5)
-  (cond
-    [(= 0 (+ v1 v2)) (< (abs v1) tolerance)]
-    [else (< (abs (/ (- v1 v2) (/ (+ v1 v2) 2))) tolerance)]))
-
+;;; 1.35
+(ex 35
 (define (fixed-point f first-guess)
   (define (try guess)
     (let ([next (f guess)])
@@ -811,19 +800,17 @@
 
 (define ((average-damp f) x)
   (average x (f x)))
-
-;;; 1.35
-(ex "1.35"
+------
 ; x = 1 + 1/x
 ; x ^ 2 - x - 1 = 0
 ; x = 1.618
 
-(@>> (fixed-point (lambda (x) (+ 1 (/ 1 x))) 1.0))
+(?~=% phi (fixed-point (lambda (x) (+ 1 (/ 1 x))) 1.0) 1e-6)
 )
 
 
 ;;; 1.36
-(ex "1.36"
+(ex 36
 (define (fixed-point-with-print f first-guess)
   (let loop ([guess first-guess] [count 1])
     (let ([next (f guess)])
@@ -836,23 +823,21 @@
   (/ (log 1000) (log x)))
 
 (define r1 (fixed-point-with-print f 2.0))
-(@>> (expt r1 r1))
+(?~=% 1000 (expt r1 r1) 1e-5)
 
 (define r2 (fixed-point-with-print (average-damp f) 2.0))
-(@>> (expt r2 r2))
+(?~=% 1000 (expt r2 r2) 1e-5)
 )
 
 
+;;; 1.37
+(ex 37
 (define (cont-frac n d k)
   (let loop ([i k] [result 0])
     (if (= i 0)
         result
         (loop (dec i) (/ (n i) (+ (d i) result))))))
-
-;;; 1.37
-(ex "1.37"
-(define phi (/ 2 (+ 1 (sqrt 5))))
-
+------
 (define (cont-frac/rec n d k)
   (let loop ([i 1])
     (if (> i k)
@@ -862,18 +847,16 @@
 (define (phi-frac k)
   (cont-frac (const 1.0) (const 1.0) k))
 
-(@>> (cont-frac/rec (const 1.0) (const 1.0) 100))
-(@>> (phi-frac 100))
+(?~=% (- phi 1) (cont-frac/rec (const 1.0) (const 1.0) 100))
+(?~=% (- phi 1) (phi-frac 100))
 
-(@>> "----------")
-(@>> phi)
-(@>> (phi-frac 10))
-(@>> (phi-frac 11))
+(?~=% (- phi 1) (phi-frac 10) 1e-4)
+(?~=% (- phi 1) (phi-frac 11) 5e-5)
 )
 
 
 ;;; ex 1.38
-(ex "1.38"
+(ex 38
 (define (d i)
   (let ([rem (remainder i 3)])
     (if (= rem 2)
@@ -881,29 +864,28 @@
         1)))
 
 (define (estimate-e k)
-  (cont-frac (const 1.0) d k))
+  (+ 2 (cont-frac (const 1.0) d k)))
 
-(@>> (estimate-e 10))
-(@>> (estimate-e 100))
+(?~=% (exp 1) (estimate-e 10))
+(?~=% (exp 1) (estimate-e 100))
 )
 
 
 ;;; ex 1.39
-(ex "1.39"
+(ex 39
 (define (tan-cf x k)
   (cont-frac
     (lambda (i) (if (= i 1) x (- (sqr x))))
     (lambda (i) (- (* 2 i) 1))
     k))
 
-(@>> (tan 0.5))
-(@>> (tan-cf 0.5 10))
-(@>> (tan-cf 0.5 20))
+(?~=% (tan 0.5) (tan-cf 0.5 10))
+(?~=% (tan 0.5) (tan-cf 0.5 20))
 )
 
 
 ;;; ex 1.40
-(ex "1.40"
+(ex 40
 (define (newtons-method g guess)
   (define dx 1e-6)
   (define ((deriv g) x)
@@ -911,16 +893,14 @@
   (define ((newtons-transform g) x)
     (- x (/ (g x) ((deriv g) x))))
   (fixed-point (newtons-transform g) guess))
-
 ------
-
 (define ((cubic a b c) x)
   (+ (* x x x) (* a x x) (* b x) c))
 
 (define (verify a b c)
   (define r (newtons-method (cubic a b c) 1.0))
   (@>> r)
-  (@>> ((cubic a b c) r)))
+  (?~= 0 ((cubic a b c) r)))
 
 (verify 1 1 1)
 (verify 1 10 100)
@@ -928,7 +908,7 @@
 
 
 ;;; ex 1.41
-(ex "1.41"
+(ex 41
 (define ((double f) x) (f (f x)))
 
 (?== 3 ((double inc) 1))
@@ -945,31 +925,27 @@
 
 
 ;;; ex 1.42
-(ex "1.42"
+(ex 42
 (define ((compose f g) x)
   (f (g x)))
-
 ------
-
 (?== 49 ((compose sqr inc) 6))
 )
 
 
 ;;; ex 1.43
-(ex "1.43"
+(ex 43
 (define (repeated f n)
   (if (= n 1)
       f
       (compose f (repeated f (- n 1)))))
-
 ------
-
 (?== 625 ((repeated sqr 2) 5))
 )
 
 
 ;;; ex 1.44
-(ex "1.44"
+(ex 44
 (define ((smooth f) x)
   (define dx 1e-6)
   (average (f x)
@@ -985,7 +961,7 @@
 
 
 ;;; ex 1.45
-(ex "1.45"
+(ex 45
 (define (nth-root n x)
   (define (f y) (/ x (expt y (- n 1))))
   (define damp-count
@@ -996,11 +972,13 @@
   (fixed-point ((repeated average-damp damp-count) f) 1.0))
 
 (define (square-root x) (nth-root 2 x))
-(@>> (square-root 2))
+(?~=% (sqrt 2) (square-root 2))
 
 (define (verify n)
-  (define r (nth-root n 12300))
-  (printf "~a ^ ~a = ~a (=12300)\n" r n (expt r n)))
+  (define x 12300)
+  (define r0 (expt x (/ 1.0 n)))
+  (define r1 (nth-root n x))
+  (?~=% r1 r0))
 
 (for/list ([n (int/list 3 10)])
   (verify n))
@@ -1008,7 +986,7 @@
 
 
 ;;; ex 1.46
-(ex "1.46"
+(ex 46
 (define ((iterative-improve good-enough? improve) guess)
   (let ([next (improve guess)])
     (if (good-enough? next guess)
@@ -1019,10 +997,13 @@
   (define (f r) (/ x r))
   ((iterative-improve close-enough? (average-damp f)) 1.0))
 
-(@>> (sqrt/v2 2.0))
+(?~=% (sqrt 2.0) (sqrt/v2 2.0))
 
 (define (fixed-point f first-guess)
   ((iterative-improve close-enough? (average-damp f)) first-guess))
 
-(@>> (fixed-point (lambda (x) (+ 1 (/ 1 x))) 1.0))
+(?~=% phi (fixed-point (lambda (x) (+ 1 (/ 1 x))) 1.0))
 )
+
+
+(run-ex 1 ~ 46)
