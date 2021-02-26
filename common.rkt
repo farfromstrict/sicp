@@ -2,8 +2,8 @@
 (require (for-syntax racket/syntax syntax/parse racket/path))
 
 (provide ex run-ex
-         ?== ?=== ?~= ?~=% ?true ?false
-         @>> @update @update!
+         ?== ?!= ?=== ?!== ?~= ?~=% ?true ?false
+         @>> @update @update! @catch
          average int/list diff-ratio)
 
 (define-syntax (ex stx)
@@ -36,8 +36,6 @@
     #`(begin
         #,@(for/list ([id ids])
              (run id))))
-  (define (syntax->datum-list ss)
-    (map (lambda (s) (syntax->datum s)) ss))
   (define (exclude lst1 lst2)
     (filter (lambda (e) (not (member e lst2))) lst1))
   (syntax-parse stx
@@ -46,17 +44,17 @@
        (exclude
          (id-list (syntax->datum #'ex-id-start)
                   (syntax->datum #'ex-id-end))
-         (syntax->datum-list (syntax->list #'(n-ex-id ...)))))]
+         (map syntax->datum (syntax->list #'(n-ex-id ...)))))]
     [(_ ex-id-start (~literal ~) ex-id-end)
      (run-list
        (id-list (syntax->datum #'ex-id-start)
                 (syntax->datum #'ex-id-end)))]
     [(_ ex-id ...)
      (run-list
-       (syntax->datum-list (syntax->list #'(ex-id ...))))]
+       (map syntax->datum (syntax->list #'(ex-id ...))))]
     [_ #'(void)]))
 
-(define-for-syntax (check-helper stx pred? aexpr eexpr [approx #f] [dproc #f])
+(define-for-syntax (check-helper stx pred? aexpr eexpr [pass-op "=="] [fail-op "!="] [dproc #f])
   (with-syntax ([stx-file (path->string (file-name-from-path (syntax-source stx)))]
                 [stx-line (syntax-line stx)]
                 [stx-col (syntax-column stx)])
@@ -64,9 +62,8 @@
              [ev #,eexpr]
              [result (#,pred? av ev)]
              [status-str (if result "SUCCESS" "FAILURE")]
+             [comp-str (if result #,pass-op #,fail-op)]
              [loc-str (format "~a:~a:~a" stx-file stx-line stx-col)]
-             [apx #,approx]
-             [comp-str (if result (if apx "~=" "==") "!=")]
              [dp #,dproc])
         (printf "[~a][~a] ~a ~a ~a" status-str loc-str av comp-str ev)
         (if dp
@@ -79,26 +76,34 @@
      (check-helper stx equal? #'aexpr #'eexpr)]
     [_ #'(void)]))
 
+(define-syntax (?!= stx)
+  (syntax-parse stx
+    [(_ aexpr eexpr)
+     (check-helper stx (lambda (v1 v2) (not (equal? v1 v2))) #'aexpr #'eexpr "!=" "==")]
+    [_ #'(void)]))
+
 (define-syntax (?=== stx)
   (syntax-parse stx
     [(_ aexpr eexpr)
      (check-helper stx eqv? #'aexpr #'eexpr)]
     [_ #'(void)]))
 
+(define-syntax (?!== stx)
+  (syntax-parse stx
+    [(_ aexpr eexpr)
+     (check-helper stx (lambda (v1 v2) (not (eqv? v1 v2))) #'aexpr #'eexpr "!=" "==")]
+    [_ #'(void)]))
+
 (define-syntax (?~= stx)
+  (define (diff v1 v2) (abs (- v1 v2)))
+  (define ((close? tolerance) v1 v2) (< (diff v1 v2) tolerance))
+  (define (helper tolerance aexpr eexpr)
+    (check-helper stx (close? tolerance) aexpr eexpr "~=" "!=" diff))
   (syntax-parse stx
     [(_ aexpr eexpr tolerance:number)
-     (check-helper
-        stx
-        (lambda (v1 v2)
-            (< (abs (- v1 v2))
-               (syntax->datum #'tolerance)))
-        #'aexpr
-        #'eexpr
-        #t
-        (lambda (v1 v2) (abs (- v1 v2))))]
+     (helper (syntax->datum #'tolerance) #'aexpr #'eexpr)]
     [(op aexpr eexpr)
-     #'(op aexpr eexpr 1e-3)]
+     (helper 1e-3 #'aexpr #'eexpr)]
     [_ #'(void)]))
 
 (define-syntax (?~=% stx)
@@ -107,17 +112,15 @@
       (cond
         [(= sum 0) (abs v1)]
         [else (abs (/ (abs (- v1 v2)) (/ sum 2.0)))])))
+  (define ((close? tolerance) v1 v2)
+    (< (diff-ratio v1 v2) tolerance))
+  (define (helper tolerance aexpr eexpr)
+    (check-helper stx (close? tolerance) aexpr eexpr "~=" "!=" diff-ratio))
   (syntax-parse stx
     [(_ aexpr eexpr tolerance:number)
-     (check-helper
-       stx
-       (lambda (v1 v2) (< (diff-ratio v1 v2) (syntax->datum #'tolerance)))
-       #'aexpr
-       #'eexpr
-       #t
-       (lambda (v1 v2) (diff-ratio v1 v2)))]
+     (helper (syntax->datum #'tolerance) #'aexpr #'eexpr)]
     [(op aexpr eexpr)
-     #'(op aexpr eexpr 1e-6)]
+     (helper 1e-6 #'aexpr #'eexpr)]
     [_ #'(void)]))
 
 (define-syntax (?true stx)
@@ -134,8 +137,10 @@
 
 (define-syntax (@>> stx)
   (syntax-parse stx
-    [(_ expr)
-     #'(printf "~a\n" expr)]
+    [(_ expr ...)
+     #'(begin
+         (printf "~a\n" expr)
+         ...)]
     [_ #'(void)]))
 
 (define-syntax (@update! stx)
@@ -156,6 +161,12 @@
          (begin
            (set! proc-id (list-ref stashs idx))
            (set! idx (+ idx 1))) ...)]))
+
+(define-syntax (@catch stx)
+  (syntax-parse stx
+    [(_ body ...)
+     #'(with-handlers ([(const #t) exn-message]) body ... (void))]
+    [_ #'(void)]))
 
 
 (define (average e . w)
