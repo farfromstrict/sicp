@@ -1,8 +1,7 @@
 #lang sicp
 (#%require "common.rkt")
 (#%require racket
-           (only math/number-theory prime?)
-           compatibility/mlist)
+           (only math/number-theory prime?))
 
 
 ;;; ex 2.1
