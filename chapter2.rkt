@@ -1,7 +1,8 @@
 #lang sicp
 (#%require "common.rkt")
 (#%require racket
-           (only math/number-theory prime?))
+           (only math/number-theory prime?)
+           compatibility/mlist)
 
 
 ;;; ex 2.1
@@ -1151,8 +1152,812 @@
 
 ;;; ex 2.56
 (ex 56
+(define (deriv0 exp var)
+  (cond
+    [(number? exp) 0]
+    [(variable? exp)
+     (if (same-variable? exp var) 1 0)]
+    [(sum? exp)
+     (make-sum
+       (deriv (addend exp) var)
+       (deriv (augend exp) var))]
+    [(product? exp)
+     (make-sum
+       (make-product
+         (multiplier exp)
+         (deriv (multiplicand exp) var))
+       (make-product
+         (deriv (multiplier exp) var)
+         (multiplicand exp)))]
+    [(exponentiation? exp)
+     (let ([u (base exp)] [n (exponent exp)])
+       (make-product
+         (make-product n (make-exponentiation u (make-sum n -1)))
+         (deriv u var)))]
+    [else (error 'deriv "unknown expression type: ~a" exp)]))
+
+(define (deriv exp var) (deriv0 exp var))
+
+(define variable? symbol?)
+(define (same-variable? v1 v2)
+  (and (variable? v1) (variable? v2) (eq? v1 v2)))
+
+(define (=number? exp num)
+  (and (number? exp) (= exp num)))
+
+(define (sum? x)
+  (and (pair? x) (eq? '+ (car x))))
+(define (make-sum a1 a2)
+  (cond
+    [(=number? a1 0) a2]
+    [(=number? a2 0) a1]
+    [(and (number? a1) (number? a2)) (+ a1 a2)]
+    [else (list '+ a1 a2)]))
+(define (addend s) (cadr s))
+(define (augend s) (caddr s))
+
+(define (product? x)
+  (and (pair? x) (eq? '* (car x))))
+(define (make-product m1 m2)
+  (cond
+    [(or (=number? m1 0) (=number? m2 0)) 0]
+    [(=number? m1 1) m2]
+    [(=number? m2 1) m1]
+    [(and (number? m1) (number? m2)) (* m1 m2)]
+    [else (list '* m1 m2)]))
+(define (multiplier p) (cadr p))
+(define (multiplicand p) (caddr p))
+
+(define (exponentiation? x)
+  (and (pair? x) (eq? '** (car x))))
+(define (make-exponentiation b e)
+  (cond
+    [(=number? e 0) 1]
+    [(=number? e 1) b]
+    [(=number? b 0) 0]
+    [(=number? b 1) 1]
+    [(and (number? b) (number? e)) (expt b e)]
+    [else (list '** b e)]))
+(define (base exp) (cadr exp))
+(define (exponent exp) (caddr exp))
+------
+; (x + 3)' = 1
+(?== 1 (deriv '(+ x 3) 'x))
+; (xy)' = y
+(?== 'y (deriv '(* x y) 'x))
+; (xy * (x + 3))' = (2xy + 3y)
+(?== '(+ (* x y) (* y (+ x 3)))
+     (deriv '(* (* x y) (+ x 3)) 'x))
+
+; (x^3)' = (3x^2)
+(?== '(* 3 (** x 2)) (deriv '(** x 3) 'x))
+; ((xy+3)^y)' = (y * y * (xy+3)^(y-1))
+(?== '(* (* y (** (+ (* x y) 3) (+ y -1))) y)
+     (deriv '(** (+ (* x y) 3) y) 'x))
 )
-(run-ex 56)
+
+
+;;; ex 2.57
+(ex 57
+(define (not-number? exp) (not (number? exp)))
+
+(define (make-sum/v2 . args)
+  (let* ([nums-sum (apply + (filter number? args))]
+         [vars (filter not-number? args)]
+         [vars-count (length vars)])
+    (cond
+      [(= vars-count 0) nums-sum]
+      [(= nums-sum 0)
+       (cond
+         [(= vars-count 1) (car vars)]
+         [else (cons '+ vars)])]
+      [else (cons '+ (cons nums-sum vars))])))
+(define (addend/v2 s) (cadr s))
+(define (augend/v2 s)
+  (apply make-sum/v2 (cddr s)))
+
+(define (make-product/v2 . args)
+  (let* ([nums-product (apply * (filter number? args))]
+         [vars (filter not-number? args)]
+         [vars-count (length vars)])
+    (cond
+      [(= vars-count 0) nums-product]
+      [(= nums-product 0) 0]
+      [(= nums-product 1)
+       (cond
+         [(= vars-count 1) (car vars)]
+         [else (cons '* vars)])]
+      [else (cons '* (cons nums-product vars))])))
+(define (multiplier/v2 p) (cadr p))
+(define (multiplicand/v2 p)
+  (apply make-product/v2 (cddr p)))
+
+(define (deriv0/v2 exp var)
+  (cond
+    [(exponentiation? exp)
+     (let ([u (base exp)] [n (exponent exp)])
+       (make-product/v2
+         n
+         (make-exponentiation u (make-sum/v2 n -1))
+         (deriv u var)))]
+    [else (deriv0 exp var)]))
+
+(define (deriv/v2 exp var) (deriv0/v2 exp var))
+------
+(@update ([make-sum make-sum/v2]
+          [addend addend/v2]
+          [augend augend/v2]
+          [make-product make-product/v2]
+          [multiplier multiplier/v2]
+          [multiplicand multiplicand/v2]
+          [deriv deriv/v2])
+  ; (x * y * (x+3))' = 2xy + 3y
+  (?== '(+ (* x y) (* y (+ x 3)))
+       (deriv '(* x y (+ x 3)) 'x))
+  ; (x * y * (x+y+3))' = 2xy + y*y + 3y
+  (?== '(+ (* x y) (* y (+ x y 3)))
+       (deriv '(* x y (+ x y 3)) 'x))
+  ; ((xy+3)^y)' = (y * y * (xy+3)^(y-1))
+  (?== '(* y (** (+ (* x y) 3) (+ -1 y)) y)
+       (deriv '(** (+ (* x y) 3) y) 'x)))
+)
+
+
+;;; ex 2.58
+(ex 58
+; 直接实现 (b) 要求, 忽略异常输入
+(define (before-member mem lst)
+  (cond
+    [(or (null? lst) (eq? mem (car lst))) '()]
+    [else (cons (car lst) (before-member mem (cdr lst)))]))
+
+(define (after-member mem lst)
+  (cdr (member mem lst)))
+
+(define (unpack lst)
+  (cond
+    [(null? lst) lst]
+    [(not (pair? lst)) lst]
+    [(null? (cdr lst)) (car lst)]
+    [else lst]))
+
+(define (join-with op lst)
+  (cond
+    [(null? lst) lst]
+    [(null? (cdr lst)) lst]
+    [else (cons (car lst) (cons op (join-with op (cdr lst))))]))
+
+(define (sum?/v3 exp)
+  (and (pair? exp) (member '+ exp)))
+; TODO, reduce
+(define (make-sum/v3 . args)
+  (let* ([nums-sum (apply + (filter number? args))]
+         [vars (filter not-number? args)]
+         [vars-count (length vars)])
+    (cond
+      [(= vars-count 0) nums-sum]
+      [(= nums-sum 0)
+       (cond
+         [(= vars-count 1) (car vars)]
+         [else (join-with '+ vars)])]
+      [else (join-with '+ (cons nums-sum vars))])))
+(define (addend/v3 exp)
+  (unpack (before-member '+ exp)))
+(define (augend/v3 exp)
+  (unpack (after-member '+ exp)))
+
+(define (product?/v3 exp)
+  (and (pair? exp)
+       (not (sum?/v3 exp))
+       (member '* exp)))
+; TODO, reduce
+(define (make-product/v3 . args)
+  (let* ([nums-product (apply * (filter number? args))]
+         [vars (filter not-number? args)]
+         [vars-count (length vars)])
+    (cond
+      [(= nums-product 0) 0]
+      [(= vars-count 0) nums-product]
+      [(= nums-product 1)
+       (cond
+         [(= vars-count 1) (car vars)]
+         [else (join-with '* vars)])]
+      [else (join-with '* (cons nums-product vars))])))
+(define (multiplier/v3 exp)
+  (unpack (before-member '* exp)))
+(define (multiplicand/v3 exp)
+  (unpack (after-member '* exp)))
+
+(define (exponentiation?/v3 exp)
+  (and (pair? exp)
+       (= 3 (length exp))
+       (eq? '** (cadr exp))))
+(define (make-exponentiation/v3 b e)
+  (cond
+    [(=number? e 0) 1]
+    [(=number? e 1) b]
+    [(=number? b 0) 0]
+    [(=number? b 1) 1]
+    [(and (number? b) (number? e)) (expt b e)]
+    [else (list b '** e)]))
+(define (base/v3 exp) (car exp))
+(define (exponent/v3 exp) (caddr exp))
+
+(define deriv/v3 deriv/v2)
+
+(@update ([sum? sum?/v3]
+          [make-sum make-sum/v3]
+          [addend addend/v3]
+          [augend augend/v3]
+          [product? product?/v3]
+          [make-product make-product/v3]
+          [multiplier multiplier/v3]
+          [multiplicand multiplicand/v3]
+          [exponentiation? exponentiation?/v3]
+          [make-exponentiation make-exponentiation/v3]
+          [base base/v3]
+          [exponent exponent/v3])
+  ; (x * y * (x+3))' = 2xy + 3y
+  (?== '((x * y) + (y * (x + 3)))
+       (deriv '(x * y * (x + 3)) 'x))
+  ; (x * y * (x+y+3))' = 2xy + y*y + 3y
+  (?== '((x * y) + (y * (x + y + 3)))
+       (deriv '(x * y * (x + y + 3)) 'x))
+  ; ((xy+3)^y)' = (y * y * (xy+3)^(y-1))
+  (?== '((y * ((x * y + 3) ** (-1 + y))) * y)
+       (deriv '((x * y + 3) ** y) 'x))
+  ; (x + 3*(x+y+2))' = 4
+  (?== 4
+       (deriv '(x + 3 * (x + y + 2)) 'x))
+  ; ((x+3) * (x+y+2))' = 2x+y+5
+  (?== '((x + 3) + (x + y + 2))
+       (deriv '((x + 3) * (x + y + 2)) 'x)))
+)
+
+
+;;; ex 2.59
+(ex 59
+(define (element-of-set? x set)
+  (cond
+    [(null? set) #f]
+    [(equal? x (car set)) #t]
+    [else (element-of-set? x (cdr set))]))
+
+(define (union-set set1 set2)
+  (cond
+    [(null? set1) set2]
+    [(null? set2) set1]
+    [(element-of-set? (car set1) set2)
+     (cons (car set1) (union-set (cdr set1) (cdr set2)))]
+    [else (cons (car set1) (union-set (cdr set1) set2))]))
+
+(?== '(1 2 3 4 5 6 7)
+     (union-set '(1 2 3 4 5) '(3 4 5 6 7)))
+)
+
+
+;;; ex 2.60
+(ex 60
+(define (element-of-set? x set)
+  (cond
+    [(null? set) #f]
+    [(equal? x (car set)) #t]
+    [else (element-of-set? x (cdr set))]))
+
+(define (adjoin-set x set) (cons x set))
+
+(define (intersection-set set1 set2)
+  (cond
+    [(or (null? set1) (null? set2)) '()]
+    [(element-of-set? (car set1) set2)
+     (cons (car set1) (intersection-set (cdr set1) set2))]
+    [else (intersection-set (cdr set1) set2)]))
+
+(define (union-set set1 set2)
+  (cond
+    [(null? set1) set2]
+    [(null? set2) set1]
+    [else (union-set (cdr set1) (cons (car set1) set2))]))
+
+(define s1 '(2 3 2 1 3 2 2))
+(define s2 '(2 3 4 5))
+
+(?true (element-of-set? 1 s1))
+(?true (element-of-set? 3 s1))
+(?false (element-of-set? 4 s1))
+
+(?== '(1 2 3 2 1 3 2 2) (adjoin-set 1 s1))
+(?== '(4 2 3 2 1 3 2 2) (adjoin-set 4 s1))
+
+(?== '(2 3 2 3 2 2) (intersection-set s1 s2))
+(?== '(2 2 3 1 2 3 2 2 3 4 5) (union-set s1 s2))
+; 插入合并操作多时选择有重复实现, 查找操作多时选择无重复实现
+)
+
+
+;;; ex 2.61
+(ex 61
+(define (adjoin-set x set)
+  (cond
+    [(null? set) (cons x '())]
+    [else
+     (let ([first (car set)] [rest (cdr set)])
+       (cond
+         [(< x first) (cons x set)]
+         [(> x first) (cons first (adjoin-set x rest))]
+         [else set]))]))
+
+(?== '(10) (adjoin-set 10 '()))
+(?== '(1 3 5 7 10) (adjoin-set 10 '(1 3 5 7)))
+(?== '(1 3 5 7) (adjoin-set 3 '(1 3 5 7)))
+(?== '(1 3 4 5 7) (adjoin-set 4 '(1 3 5 7)))
+)
+
+
+;;; ex 2.62
+(ex 62
+(define (intersection-set set1 set2)
+  (cond
+    [(or (null? set1) (null? set2)) '()]
+    [else
+     (let ([f1 (car set1)] [f2 (car set2)])
+       (cond
+         [(< f1 f2) (intersection-set (cdr set1) set2)]
+         [(> f1 f2) (intersection-set set1 (cdr set2))]
+         [else (cons f1 (intersection-set (cdr set1) (cdr set2)))]))]))
+
+(define (union-set set1 set2)
+  (cond
+    [(null? set1) set2]
+    [(null? set2) set1]
+    [else
+     (let ([f1 (car set1)] [f2 (car set2)])
+       (cond
+         [(< f1 f2) (cons f1 (union-set (cdr set1) set2))]
+         [(> f1 f2) (cons f2 (union-set set1 (cdr set2)))]
+         [else (cons f1 (union-set (cdr set1) (cdr set2)))]))]))
+------
+(?== '(1 2 3 4 5 6 7 8) (union-set '(1 3 5 7) '(2 4 6 8)))
+(?== '(1 3 5 7 9 11) (union-set '(1 3 5 7) '(1 5 9 11)))
+)
+
+
+;;; ex 2.63
+(ex 63
+(define (entry tree) (car tree))
+(define (left-branch tree) (cadr tree))
+(define (right-branch tree) (caddr tree))
+
+(define (tree->list-1 tree)
+  (if (null? tree)
+      '()
+      (append (tree->list-1 (left-branch tree))
+              (cons (entry tree)
+                    (tree->list-1 (right-branch tree))))))
+
+(define (tree->list-2 tree)
+  (define (copy-to-list tree result-list)
+    (if (null? tree)
+        result-list
+        (copy-to-list
+          (left-branch tree)
+          (cons (entry tree)
+                (copy-to-list
+                  (right-branch tree)
+                  result-list)))))
+  (copy-to-list tree '()))
+------
+(define t1 '(7 (3 (1 () ()) (5 () ())) (9 () (11 () ()))))
+(define t2 '(3 (1 () ()) (7 (5 () ()) (9 () (11 () ())))))
+(define t3 '(5 (3 (1 () ()) ()) (9 (7 () ()) (11 () ()))))
+
+(?== '(1 3 5 7 9 11) (tree->list-1 t1))
+(?== '(1 3 5 7 9 11) (tree->list-2 t1))
+(?== '(1 3 5 7 9 11) (tree->list-1 t2))
+(?== '(1 3 5 7 9 11) (tree->list-2 t2))
+(?== '(1 3 5 7 9 11) (tree->list-1 t3))
+(?== '(1 3 5 7 9 11) (tree->list-2 t3))
+
+; 两个过程结果相同
+; tree->list-1 增长速度量级为 O(N) = N*logN
+; tree->list-2 增长速度量级为 O(N) = N
+)
+
+
+;;; ex 2.64
+(ex 64
+(define (make-tree entry left-branch right-branch)
+  (list entry left-branch right-branch))
+
+(define (list->tree elements)
+  (car (patial-tree elements (length elements))))
+
+(define (patial-tree elts n)
+  (if (= n 0)
+      (cons '() elts)
+      (let* ([left-size (quotient (- n 1) 2)]
+             [left-result (patial-tree elts left-size)]
+             [left-tree (car left-result)]
+             [non-left-elts (cdr left-result)]
+             [right-size (- n (+ left-size 1))]
+             [this-entry (car non-left-elts)]
+             [right-result (patial-tree (cdr non-left-elts) right-size)]
+             [rigth-tree (car right-result)]
+             [remaining-elts (cdr right-result)])
+        (cons (make-tree this-entry left-tree rigth-tree)
+              remaining-elts))))
+------
+(?== '(5 (1 () (3 () ())) (9 (7 () ()) (11 () ())))
+     (list->tree '(1 3 5 7 9 11)))
+
+; 二分法将列表划分为两部分
+; 先处理左半部分, 得到结果 (cons 左半树 剩余元素)
+; 剩余元素 = 根元素 + 右半部分元素
+; 再处理右半部分元素, 得到结果 (cons 右半树 空表)
+; 组合 根元素, 左半树, 右半树 得到最终结果
+;
+; 使用二分法处理, O(N)=log(N)
+)
+
+
+;;; ex 2.65
+(ex 65
+(define tree->list tree->list-2)
+
+(define (intersection-set/tree tree1 tree2)
+  (list->tree (intersection-set (tree->list tree1) (tree->list tree2))))
+
+(define (union-set/tree tree1 tree2)
+  (list->tree (union-set (tree->list tree1) (tree->list tree2))))
+
+(define t1 '(3 (1 () ()) (5 () (7 () ()))))
+(define t2 '(4 (2 () ()) (6 () (8 () ()))))
+(define t3 '(5 (1 () ()) (9 () (11 () ()))))
+
+(?== '()
+     (intersection-set/tree t1 t2))
+(?== '(4 (2 (1 () ()) (3 () ())) (6 (5 () ()) (7 () (8 () ()))))
+     (union-set/tree t1 t2))
+(?== '(1 () (5 () ()))
+     (intersection-set/tree t1 t3))
+(?== '(5 (1 () (3 () ())) (9 (7 () ()) (11 () ())))
+     (union-set/tree t1 t3))
+
+; list->tree, tree->list 的时间复杂度为 O(N) = log(N)
+; intersection-set, union-set 的时间复杂度为 O(N) = N
+; 所以总的时间复杂度为 O(N) = N + log(N) = N
+)
+
+
+;;; ex 2.66
+(ex 66
+(define (make-record key value) (list key value))
+(define (key record) (car record))
+(define (value record) (cadr record))
+
+(define (lookup given-key set-of-records)
+  (cond
+    [(null? set-of-records) #f]
+    [else
+     (let* ([root (entry set-of-records)] [root-key (key root)])
+       (cond
+         [(= given-key root-key) root]
+         [(< given-key root-key) (lookup given-key (left-branch set-of-records))]
+         [else (lookup given-key (right-branch set-of-records))]))]))
+
+(define s1 '((5 50) ((2 20) ((1 10) () ()) ((3 30) () ())) ((7 70) ((6 60) () ()) ((8 80) () ()))))
+
+(?== '(3 30) (lookup 3 s1))
+(?== #f (lookup 4 s1))
+(?== '(7 70) (lookup 7 s1))
+(?== #f (lookup 10 s1))
+)
+
+
+;;; ex 2.67
+(ex 67
+(define (make-leaf symbol weight) (list 'leaf symbol weight))
+(define (leaf? object) (eq? 'leaf (car object)))
+(define (symbol-leaf x) (cadr x))
+(define (weight-leaf x) (caddr x))
+
+(define (make-code-tree left right)
+  (list left
+        right
+        (append (symbols left) (symbols right))
+        (+ (weight left) (weight right))))
+(define (symbols tree)
+  (if (leaf? tree)
+      (list (symbol-leaf tree))
+      (caddr tree)))
+(define (weight tree)
+  (if (leaf? tree)
+      (weight-leaf tree)
+      (cadddr tree)))
+
+(define (decode bits tree)
+  (define (helper bits current-branch)
+    (if (null? bits)
+        '()
+        (let ([next-branch (choose-branch (car bits) current-branch)])
+          (if (leaf? next-branch)
+              (cons (symbol-leaf next-branch)
+                    (helper (cdr bits) tree))
+              (helper (cdr bits) next-branch)))))
+  (helper bits tree))
+
+(define (choose-branch bit tree)
+  (cond
+    [(= bit 0) (car tree)]
+    [(= bit 1) (cadr tree)]
+    [else (error 'choose-branch "bad bit: ~a" bit)]))
+
+(define sample-tree
+  (make-code-tree
+    (make-leaf 'A 4)
+    (make-code-tree
+      (make-leaf 'B 2)
+      (make-code-tree
+        (make-leaf 'D 1)
+        (make-leaf 'C 1)))))
+; A - 0
+; B - 10
+; C - 111
+; D - 110
+------
+(define sample-message 
+  '(0 1 1 0 0 1 0 1 0 1 1 1 0))
+
+(?== '(A D A B B C A) (decode sample-message sample-tree))
+)
+
+
+;;; ex 2.68
+(ex 68
+(define (encode message tree)
+  (if (null? message)
+      '()
+      (append (encode-symbol (car message) tree)
+              (encode (cdr message) tree))))
+
+(define (encode-symbol symbol tree)
+  (let loop ([branch tree] [rst '()])
+    (if (leaf? branch)
+        (if (eq? symbol (symbol-leaf branch))
+            (reverse rst)
+            (error 'encode-symbol "bad symbol: ~a" symbol))
+        (if (member symbol (symbols branch))
+            (let ([left-branch (car branch)] [right-branch (cadr branch)])
+              (cond
+                [(member symbol (symbols left-branch))
+                 (loop left-branch (cons 0 rst))]
+                [else (loop right-branch (cons 1 rst))]))
+            (error 'encode-symbol "bad symbol: ~a" symbol)))))
+------
+(?== '(0 1 1 0 0 1 0 1 0 1 1 1 0)
+     (encode '(A D A B B C A) sample-tree))
+)
+
+
+;;; ex 2.69
+(ex 69
+(define (adjoin-set x set)
+  (cond
+    [(null? set) (list x)]
+    [(< (weight x) (weight (car set))) (cons x set)]
+    [else (cons (car set) (adjoin-set x (cdr set)))]))
+
+(define (make-leaf-set pairs)
+  (if (null? pairs)
+      '()
+      (let ([pair (car pairs)])
+        (adjoin-set (make-leaf (car pair) (cadr pair))
+                    (make-leaf-set (cdr pairs))))))
+
+(define (generate-huffman-tree pairs)
+  (successive-merge (make-leaf-set pairs)))
+
+(define (successive-merge set)
+  (if (= 1 (length set))
+      (car set)
+      (successive-merge
+        (adjoin-set
+          (make-code-tree (car set) (cadr set))
+          (cddr set)))))
+------
+(define pairs '((A 4) (B 2) (C 1) (D 1)))
+(define tree (generate-huffman-tree pairs))
+
+(?== '(0) (encode '(A) tree))
+(?== '(1 0) (encode '(B) tree))
+(?== '(1 1 1) (encode '(C) tree))
+(?== '(1 1 0) (encode '(D) tree))
+)
+
+
+;;; ex 2.70
+(ex 70
+(define pairs '((a 2) (na 16) (boom 1) (Sha 3) (Get 2) (yip 9) (job 2) (Wah 1)))
+
+(define song
+  '(Get a job
+    Sha na na na na na na na na
+    Get a job
+    Sha na na na na na na na na
+    Wah yip yip yip yip 
+    yip yip yip yip yip
+    Sha boom))
+
+(define htree (generate-huffman-tree pairs))
+
+(define code (encode song htree))
+(?== song (decode code htree))
+(printf "Word count: ~a, Code bit count: ~a\n" (length song) (length code))
+; 霍夫曼编码需要 84 个二进制位, 如果是定长编码, 需要二进制位 3 * 36 = 108
+)
+
+
+;;; ex 2.71
+(ex 71
+; n = 5
+(define pairs '((A 1) (B 2) (C 4) (D 8) (E 16)))
+(define htree (generate-huffman-tree pairs))
+(@>> htree)
+(?== '(1) (encode '(E) htree))
+(?== '(0 0 0 0) (encode '(A) htree))
+; 最频繁的符号用 1 个二进制位, 最不频繁的符号用 (n-1) 个二进制位
+)
+
+
+;;; ex 2.72
+(ex 72
+; (((((leaf A 1) (leaf B 2) (A B) 3) (leaf C 4) (A B C) 7) (leaf D 8) (A B C D) 15) (leaf E 16) (A B C D E) 31)
+;
+; 考虑如 2.71 描述的特殊情况:
+; 最频繁的符号: 符号出现在符号表最右侧, member 查找的时间复杂度为 O(N), 查找次数为 O(1), 总复杂度为 O(N) * O(1) = O(N)
+; 最不频繁的符号: 符号出现在符号表最左侧, member 查找的时间复杂度为 O(1), 查找次数为 O(N), 总复杂度为 O(1) * O(N) = O(N)
+; 最差情况: 符号出现在符号表中间, member 查找的时间复杂度为 O(N), 查找次数为 O(N), 总复杂度为 O(N) * O(N) = O(N^2)
+;
+; 一般情况: member 查找的时间复杂度为 O(N), 查找次数为 O(logN), 总复杂度为 O(N*logN)
+)
+
+
+;;; ex 2.73
+(ex 73
+(define table (mcons '**rules** '()))
+
+(define (massoc key mlst)
+  (if (null? mlst)
+      #f
+      (let ([first (mcar mlst)])
+        (if (equal? key (mcar first))
+            first
+            (massoc key (mcdr mlst))))))
+
+(define (madd element mlst)
+  (if (null? (mcdr mlst))
+      (set-cdr! mlst (mcons element '()))
+      (set-cdr! mlst (mcons element (mcdr mlst)))))
+
+(define (clear)
+  (set-cdr! table '()))
+
+(define (put tag type proc)
+  (let ([records (massoc tag (mcdr table))]
+        [record (mcons type proc)])
+    (if records
+        (madd record records)
+        (madd (mcons tag (mcons record '())) table))))
+
+(define (get tag type)
+  (let ([records (massoc tag (mcdr table))])
+    (if records
+        (let ([record (massoc type (mcdr records))])
+          (if record
+              (mcdr record)
+              (error 'get "failed to get by type, ~a" type)))
+        (error 'get "failed to get by tag, ~a" tag))))
+
+(define deriv-proc #f)
+
+(define (deriv exp var)
+  (cond
+    [(number? exp) 0]
+    [(variable? exp)
+     (if (same-variable? exp var) 1 0)]
+    [else
+     (deriv-proc exp var)]))
+
+(define (operator exp) (car exp))
+(define (operands exp) (cdr exp))
+
+(define (make-sum . args)
+  (let* ([nums-sum (apply + (filter number? args))]
+         [vars (filter not-number? args)]
+         [vars-count (length vars)])
+    (cond
+      [(= vars-count 0) nums-sum]
+      [(= nums-sum 0)
+       (cond
+         [(= vars-count 1) (car vars)]
+         [else (cons '+ vars)])]
+      [else (cons '+ (cons nums-sum vars))])))
+
+(define (make-product . args)
+  (let* ([nums-product (apply * (filter number? args))]
+         [vars (filter not-number? args)]
+         [vars-count (length vars)])
+    (cond
+      [(= vars-count 0) nums-product]
+      [(= nums-product 0) 0]
+      [(= nums-product 1)
+       (cond
+         [(= vars-count 1) (car vars)]
+         [else (cons '* vars)])]
+      [else (cons '* (cons nums-product vars))])))
+
+(define (make-exponentiation b e)
+  (list '** b e))
+
+(define (deriv/sum args var)
+  (apply make-sum (map (lambda (arg) (deriv arg var)) args)))
+
+(define (deriv/product args var)
+  (let ([v1 (car args)] [v2 (apply make-product (cdr args))])
+    (make-sum
+      (make-product v1 (deriv v2 var))
+      (make-product (deriv v1 var) v2))))
+
+(define (deriv/exponentiation args var)
+  (let ([u (car args)] [n (cadr args)])
+    (make-product
+      n
+      (make-exponentiation u (make-sum n -1))
+      (deriv u var))))
+
+(define (deriv-proc/v1 exp var)
+  ((get 'deriv (operator exp)) (operands exp) var))
+
+(define (deriv-proc/v2 exp var)
+  ((get (operator exp) 'deriv) (operands exp) var))
+
+(define (verify)
+  (?== '(+ (* x y) (* y (+ x 3)))
+       (deriv '(* x y (+ x 3)) 'x))
+  (?== '(+ (* x y) (* y (+ x y 3)))
+       (deriv '(* x y (+ x y 3)) 'x))
+  (?== '(* y (** (+ (* x y) 3) (+ -1 y)) y)
+       (deriv '(** (+ (* x y) 3) y) 'x))
+  (?== 4
+       (deriv '(+ x (* 3 (+ x y 2))) 'x))
+  (?== '(+ (+ x 3) (+ x y 2))
+       (deriv '(* (+ x 3) (+ x y 2)) 'x)))
+
+(@update ([deriv-proc deriv-proc/v1])
+  (clear)
+  (put 'deriv '+ deriv/sum)
+  (put 'deriv '* deriv/product)
+  (put 'deriv '** deriv/exponentiation)
+  (verify))
+
+(@>> "------")
+
+(@update ([deriv-proc deriv-proc/v2])
+  (clear)
+  (put '+ 'deriv deriv/sum)
+  (put '* 'deriv deriv/product)
+  (put '** 'deriv deriv/exponentiation)
+  (verify))
+
+; 获取 exp 表达式的运算符, 根据运算符获取到对应的求导规则进行求导
+; 纯数值和变量无运算符, 无法从规则表中获取规则, 也就无法进行数据导向分派
+)
+
+
+;;; ex 2.74
+(ex 74
+)
+(run-ex 74)
 
 
 ; (run-ex 1 ~ 42)
