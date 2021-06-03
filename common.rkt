@@ -111,7 +111,7 @@
     (let ([sum (+ v1 v2)])
       (cond
         [(= sum 0) (abs v1)]
-        [else (abs (/ (abs (- v1 v2)) (/ sum 2.0)))])))
+        [else (abs (/ (- v1 v2) (/ sum 2.0)))])))
   (define ((close? tolerance) v1 v2)
     (< (diff-ratio v1 v2) tolerance))
   (define (helper tolerance aexpr eexpr)

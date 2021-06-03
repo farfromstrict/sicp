@@ -1838,9 +1838,6 @@
       (set-cdr! mlst (mcons element '()))
       (set-cdr! mlst (mcons element (mcdr mlst)))))
 
-(define (clear)
-  (set-cdr! table '()))
-
 (define (put tag type proc)
   (let ([records (massoc tag (mcdr table))]
         [record (mcons type proc)])
@@ -1854,10 +1851,13 @@
         (let ([record (massoc type (mcdr records))])
           (if record
               (mcdr record)
-              (error 'get "failed to get by type, ~a" type)))
-        (error 'get "failed to get by tag, ~a" tag))))
-
+              #f))
+        #f)))
+------
 (define deriv-proc #f)
+
+(define (clear)
+  (set-cdr! table '()))
 
 (define (deriv exp var)
   (cond
@@ -1955,9 +1955,909 @@
 
 ;;; ex 2.74
 (ex 74
+; get 过程从 set 中获取指定 tag 的元素
+(define (get tag set) #f)
+
+; a) 雇员文件结构: 以雇员名字为 key 的集合
+;    分支机构应提供从文件中获取 record 的方法
+(define get-record-methods '())
+(define (get-record employee-name file)
+  ((get 'get-record get-record-methods) employee-name file))
+
+; b) 提供从 record 中获取 salary 的方法
+(define get-salary-methods '())
+(define (get-salary employee-name file)
+  ((get 'get-salary get-salary-methods)
+   (get-record employee-name file)))
+
+; c)
+(define (find-employee-record employee-name division-files)
+  (if (null? division-files)
+      #f
+      (let* ([file (car division-files)]
+             [record (get-record employee-name file)])
+        (if record
+            record
+            (find-employee-record employee-name (cdr division-files))))))
+
+; d) 将新公司的雇员文件添加到 division-files 中
+;    将新公司的相关方法添加到 get-record-methods, get-salary-methods 等方法列表中
 )
-(run-ex 74)
 
 
-; (run-ex 1 ~ 42)
+;;; ex 2.75
+(ex 75
+(define (make-from-mag-ang r a)
+  (define (dispatch op)
+    (cond
+      [(eq? op 'real-part) (* r (cos a))]
+      [(eq? op 'imag-part) (* r (sin a))]
+      [(eq? op 'magnitude) r]
+      [(eq? op 'angle) a]
+      [else (error 'make-from-mag-ang "unknown operation: ~a" op)]))
+  dispatch)
+
+(define z (make-from-mag-ang 10.0 (/ pi 6)))
+(?~= 8.66 (z 'real-part))
+(?~= 5.0 (z 'imag-part))
+(?~= 10.0 (z 'magnitude))
+(?~= 0.523 (z 'angle))
+)
+
+
+;;; ex 2.76
+(ex 76
+; 1) 带有显式分派的通用型操作: 新类型-新增分派类型, 新操作-新增操作过程
+; 2) 数据导向 (一级:类型, 二级:操作): 新类型-新增类型及现有操作, 新操作-所有类型新增操作
+; 3) 消息传递 (一级:操作, 二级:类型): 新类型-所有操作新增类型, 新操作-新增操作及现有类型
+;
+; 如果新增类型常见, 数据导向方式合适
+; 如果新增操作常见, 消息传递方式合适
+)
+
+
+;;; ex 2.77
+(ex 77
+(@update! ([table (mcons '**numbers** '())]))
+
+(define (attach-tag type-tag contents) (cons type-tag contents))
+(define (type-tag datum)
+  (if (pair? datum)
+      (car datum)
+      (error 'type-tag "bad tagged datum, ~a" datum)))
+(define (contents datum)
+  (if (pair? datum)
+      (cdr datum)
+      (error 'contents "bad tagged datum, ~a" datum)))
+
+(define (apply-generic op . args)
+  (let* ([type-tags (map type-tag args)]
+         [proc (get op type-tags)])
+    (if proc
+        (apply proc (map contents args))
+        (error 'apply-generic "no method for this types, ~a" op))))
+
+(define (add x y) (apply-generic 'add x y))
+(define (sub x y) (apply-generic 'sub x y))
+(define (mul x y) (apply-generic 'mul x y))
+(define (div x y) (apply-generic 'div x y))
+
+(define (install-scheme-number-package)
+  (define (tag x) (attach-tag 'scheme-number x))
+  (put 'add '(scheme-number scheme-number)
+       (lambda (x y) (tag (+ x y))))
+  (put 'sub '(scheme-number scheme-number)
+       (lambda (x y) (tag (- x y))))
+  (put 'mul '(scheme-number scheme-number)
+       (lambda (x y) (tag (* x y))))
+  (put 'div '(scheme-number scheme-number)
+       (lambda (x y) (tag (/ x y))))
+  (put 'make 'scheme-number
+       (lambda (x) (tag x)))
+  'done)
+
+(define (make-scheme-number n)
+  ((get 'make 'scheme-number) n))
+
+(define (install-rational-package)
+  (define (numer x) (car x))
+  (define (denom x) (cdr x))
+  (define (make-rat n d)
+    (let ([g (gcd n d)])
+      (cond
+        [(> d 0) (cons (/ n g) (/ d g))]
+        [(< d 0) (cons (- (/ n g)) (- (/ d g)))]
+        [else (error 'make-rat "denom is zero")])))
+  (define (add-rat x y)
+    (make-rat (+ (* (numer x) (denom y))
+                 (* (numer y) (denom x)))
+              (* (denom x) (denom y))))
+  (define (sub-rat x y)
+    (make-rat (- (* (numer x) (denom y))
+                 (* (numer y) (denom x)))
+              (* (denom x) (denom y))))
+  (define (mul-rat x y)
+    (make-rat (* (numer x) (numer y))
+              (* (denom x) (denom y))))
+  (define (div-rat x y)
+    (make-rat (* (numer x) (denom y))
+              (* (denom x) (numer y))))
+
+  (define (tag x) (attach-tag 'rational x))
+  (put 'add '(rational rational)
+    (lambda (x y) (tag (add-rat x y))))
+  (put 'sub '(rational rational)
+    (lambda (x y) (tag (sub-rat x y))))
+  (put 'mul '(rational rational)
+    (lambda (x y) (tag (mul-rat x y))))
+  (put 'div '(rational rational)
+    (lambda (x y) (tag (div-rat x y))))
+  (put 'numer '(rational) numer)
+  (put 'denom '(rational) denom)
+  (put 'make 'rational (lambda (n d) (tag (make-rat n d))))
+  'done)
+
+(define (make-rational n d)
+  ((get 'make 'rational) n d))
+(define (numer r) (apply-generic 'numer r))
+(define (denom r) (apply-generic 'denom r))
+
+(define (install-rectangular-package)
+  (define (make-from-real-imag x y) (cons x y))
+  (define (real-part z) (car z))
+  (define (imag-part z) (cdr z))
+  (define (magnitude z)
+    (sqrt (+ (sqr (real-part z))
+             (sqr (imag-part z)))))
+  (define (angle z)
+    (atan (imag-part z) (real-part z)))
+  (define (make-from-mag-ang r a)
+    (cons (* r (cos a)) (* r (sin a))))
+
+  (define (tag z) (attach-tag 'rectangular z))
+  (put 'real-part '(rectangular) real-part)
+  (put 'imag-part '(rectangular) imag-part)
+  (put 'magnitude '(rectangular) magnitude)
+  (put 'angle '(rectangular) angle)
+  (put 'make-from-real-imag 'rectangular
+       (lambda (x y) (tag (make-from-real-imag x y))))
+  (put 'make-from-mag-ang 'rectangular
+       (lambda (r a) (tag (make-from-mag-ang r a))))
+  'done)
+
+(define (install-polar-package)
+  (define (make-from-mag-ang r a) (cons r a))
+  (define (magnitude z) (car z))
+  (define (angle z) (cdr z))
+  (define (real-part z)
+    (* (magnitude z) (cos (angle z))))
+  (define (imag-part z)
+    (* (magnitude z) (sin (angle z))))
+  (define (make-from-real-imag x y)
+    (cons (sqrt (+ (sqr x) (sqr y)))
+          (atan y x)))
+
+  (define (tag z) (attach-tag 'polar z))
+  (put 'real-part '(polar) real-part)
+  (put 'imag-part '(polar) imag-part)
+  (put 'magnitude '(polar) magnitude)
+  (put 'angle '(polar) angle)
+  (put 'make-from-mag-ang 'polar
+       (lambda (r a) (tag (make-from-mag-ang r a))))
+  (put 'make-from-real-imag 'polar
+       (lambda (x y) (tag (make-from-real-imag x y))))
+  'done)
+
+(define (real-part z) (apply-generic 'real-part z))
+(define (imag-part z) (apply-generic 'imag-part z))
+(define (magnitude z) (apply-generic 'magnitude z))
+(define (angle z) (apply-generic 'angle z))
+
+(define (install-complex-package)
+  (install-rectangular-package)
+  (install-polar-package)
+
+  (define (make-from-real-imag x y)
+    ((get 'make-from-real-imag 'rectangular) x y))
+  (define (make-from-mag-ang r a)
+    ((get 'make-from-mag-ang 'polar) r a))
+
+  (define (add-complex z1 z2)
+    (make-from-real-imag
+      (+ (real-part z1) (real-part z2))
+      (+ (imag-part z1) (imag-part z2))))
+  (define (sub-complex z1 z2)
+    (make-from-real-imag
+      (- (real-part z1) (real-part z2))
+      (- (imag-part z1) (imag-part z2))))
+  (define (mul-complex z1 z2)
+    (make-from-mag-ang
+      (* (magnitude z1) (magnitude z2))
+      (+ (angle z1) (angle z2))))
+  (define (div-complex z1 z2)
+    (make-from-mag-ang
+      (/ (magnitude z1) (magnitude z2))
+      (- (angle z1) (angle z2))))
+
+  (define (tag z) (attach-tag 'complex z))
+  (put 'add '(complex complex)
+       (lambda (x y) (tag (add-complex x y))))
+  (put 'sub '(complex complex)
+       (lambda (x y) (tag (sub-complex x y))))
+  (put 'mul '(complex complex)
+       (lambda (x y) (tag (mul-complex x y))))
+  (put 'div '(complex complex)
+       (lambda (x y) (tag (div-complex x y))))
+  (put 'make-from-real-imag 'complex
+       (lambda (x y) (tag (make-from-real-imag x y))))
+  (put 'make-from-mag-ang 'complex
+       (lambda (r a) (tag (make-from-mag-ang r a))))
+  (put 'real-part '(complex) real-part)
+  (put 'imag-part '(complex) imag-part)
+  (put 'magnitude '(complex) magnitude)
+  (put 'angle '(complex) angle)
+  'done)
+
+(define (make-from-real-imag x y)
+  ((get 'make-from-real-imag 'complex) x y))
+(define (make-from-mag-ang r a)
+  ((get 'make-from-mag-ang 'complex) r a))
+
+(define (format-real-imag c)
+  (format "(~a, ~a)" (real-part c) (imag-part c)))
+
+(define (install-number-packages)
+  (install-scheme-number-package)
+  (install-rational-package)
+  (install-complex-package))
+------
+(install-number-packages)
+
+(define z (make-from-real-imag 3 4))
+(?== 5 (magnitude z))
+
+; apply-generic 被调用 2 次
+;
+; z = '(complex rectangular 3 . 4)
+; (magnitude '(complex rectangular 3 . 4))
+;   = (apply-generic 'magnitude '(complex rectangular 3 . 4))
+;   = ((get 'magnitude '(complex)) ca)
+;   = (magnitude '(rectangular 3 . 4))  ;; 此 magnitude 过程在 complex 包中被装载 (递归)
+;   = (apply-generic 'magnitude '(rectangular 3 . 4))
+;   = ((get 'magnitude '(rectangular)) (3 . 4))
+;   = (magnitude (3 . 4))  ;; 此 magnitude 过程在 rectangular 包中被装载
+;   = (sqrt (+ (sqr 3) (sqr 4)))
+;   = 5
+)
+
+
+;;; ex 2.78
+(ex 78
+(define (attach-tag/v2 type-tag contents)
+  (cond
+    [(or (number? contents) (symbol? contents)) contents]
+    [else (cons type-tag contents)]))
+
+(define (type-tag/v2 datum)
+  (if (pair? datum) (car datum) 'scheme-number))
+
+(define (contents/v2 datum)
+  (if (pair? datum) (cdr datum) datum))
+
+(@update! ([attach-tag attach-tag/v2]
+           [type-tag type-tag/v2]
+           [contents contents/v2]))
+------
+(install-number-packages)
+
+(define x (make-scheme-number 10))
+(define y (make-scheme-number 20))
+(printf "~a + ~a = ~a\n" x y (add x y))
+(printf "~a * ~a = ~a\n" x y (mul x y))
+
+(define c1 (make-from-real-imag 3 4))
+(define c2 (make-from-real-imag 5 6))
+(printf "~a + ~a = ~a\n" (format-real-imag c1)
+                         (format-real-imag c2)
+                         (format-real-imag (add c1 c2)))
+(printf "~a * ~a = ~a\n" (format-real-imag c1)
+                         (format-real-imag c2)
+                         (format-real-imag (mul c1 c2)))
+
+)
+
+
+;;; ex 2.79
+(ex 79
+(define (install-equ-to-packges)
+  (put 'equ? '(scheme-number scheme-number)
+       (lambda (nx ny) (= nx ny)))
+  (put 'equ? '(scheme-number rational)
+       (lambda (n r) (= (car r) (* n (cdr r)))))
+  (put 'equ? '(scheme-number complex)
+       (lambda (n c) (and (= 0 (imag-part c))
+                          (= n (real-part c)))))
+  (put 'equ? '(rational scheme-number)
+       (lambda (r n) (= (car r) (* n (cdr r)))))
+  (put 'equ? '(rational rational)
+       (lambda (rx ry) (= (* (car rx) (cdr ry))
+                          (* (cdr rx) (car ry)))))
+  (put 'equ? '(rational complex)
+       (lambda (r c) (and (= 0 (imag-part c))
+                          (= (car r) (* (cdr r) (real-part c))))))
+  (put 'equ? '(complex scheme-number)
+       (lambda (c n) (and (= 0 (imag-part c))
+                          (= n (real-part c)))))
+  (put 'equ? '(complex rational)
+       (lambda (c r) (and (= 0 (imag-part c))
+                          (= (car r) (* (cdr r) (real-part c))))))
+  (put 'equ? '(complex complex)
+       (lambda (cx cy) (and (= (real-part cx) (real-part cy))
+                            (= (imag-part cx) (imag-part cy)))))
+  )
+
+(define (equ? x y) (apply-generic 'equ? x y))
+------
+(install-number-packages)
+(install-equ-to-packges)
+
+(define n1 (make-scheme-number 10))
+(define n2 (make-scheme-number 20))
+(define r1 (make-rational 10 1))
+(define r2 (make-rational 20 2))
+(define r3 (make-rational 20 3))
+(define c1 (make-from-real-imag 10 10))
+(define c2 (make-from-real-imag 10 10))
+(define c3 (make-from-real-imag 10 0))
+
+(?true (equ? n1 n1))
+(?false (equ? n1 n2))
+
+(?true (equ? r1 r2))
+(?false (equ? r1 r3))
+
+(?true (equ? n1 r1))
+(?true (equ? n1 r2))
+(?false (equ? n2 r1))
+
+(?true (equ? r1 n1))
+(?true (equ? r2 n1))
+(?false (equ? r1 n2))
+
+(?true (equ? c1 c2))
+(?false (equ? c1 c3))
+
+(?true (equ? c3 n1))
+(?true (equ? n1 c3))
+(?false (equ? c1 n1))
+(?false (equ? n1 c1))
+
+(?true (equ? c3 r1))
+(?true (equ? r1 c3))
+(?false (equ? c1 r3))
+(?false (equ? r3 c1))
+)
+
+
+;;; ex 2.80
+(ex 80
+(define (install-=zero?-to-packages)
+  (put '=zero? '(scheme-number)
+    (lambda (n) (= 0 n)))
+  (put '=zero? '(rational)
+    (lambda (r) (= 0 (car r))))
+  (put '=zero? '(complex)
+    (lambda (c) (and (= 0 (real-part c))
+                     (= 0 (imag-part c)))))
+  )
+(define (=zero? x) (apply-generic '=zero? x))
+------
+(install-number-packages)
+(install-=zero?-to-packages)
+
+(define n1 (make-scheme-number 0))
+(define n2 (make-scheme-number 10))
+(define r1 (make-rational 0 3))
+(define r2 (make-rational 10 3))
+(define c1 (make-from-real-imag 0 0))
+(define c2 (make-from-real-imag 10 0))
+(define c3 (make-from-real-imag 0 10))
+(define c4 (make-from-real-imag 10 10))
+
+(?true (=zero? n1))
+(?false (=zero? n2))
+(?true (=zero? r1))
+(?false (=zero? r2))
+(?true (=zero? c1))
+(?false (=zero? c2))
+(?false (=zero? c3))
+(?false (=zero? c4))
+)
+
+
+;;; ex 2.81
+(ex 81
+; a) 无限递归
+;    (apply-generic 'exp c1 c2)
+;    =>
+;    (get 'exp '(complex complex)) = #f
+;    =>
+;    (get-coercion 'complex 'complex) = complex->complex
+;    =>
+;    (apply-generic 'exp (complex->complex c1) c2)
+;    =>
+;    (apply-generic 'exp c1 c2)
+;
+; b) 不能正确工作, 有可能无限递归
+;
+; c) 先判断参数类型, 如果相同则不进行强转
+(define get-coercion #f)
+
+(define (apply-generic/v2 op . args)
+  (define (no-method-error type-tags)
+    (error 'apply-generic "No method for these types, ~a" (list op type-tags)))
+  (let* ([type-tags (map type-tag args)]
+         [proc (get op type-tags)])
+    (if proc
+        (apply proc (map contents args))
+        (if (= 2 (length args))
+            (let ([type1 (car type-tags)]
+                  [type2 (cadr type-tags)]
+                  [a1 (car args)]
+                  [a2 (cadr args)])
+              (if (eq? type1 type2)
+                  (no-method-error type-tags)
+                  (let ([t1->t2 (get-coercion type1 type2)]
+                        [t2->t1 (get-coercion type2 type1)])
+                    (cond
+                      [t1->t2 (apply-generic/v2 op (t1->t2 a1) a2)]
+                      [t2->t1 (apply-generic/v2 op a1 (t2->t1 a2))]
+                      [else (no-method-error type-tags)]))))
+            (no-method-error type-tags)))))
+)
+
+
+;;; ex 2.82
+(ex 82
+(define get-coercion #f)
+
+(define (apply-generic/v3 op . args)
+  (define (no-method-error type-tags)
+    (error 'apply-generic "No method for these types, ~a" (list op type-tags)))
+  (define (same-type? type-tags)
+    (let ([first (car type-tags)] [rest (cdr type-tags)])
+      (andmap (lambda (e) (eq? e first)) rest)))
+  (define (get-coercions one-type type-tags)
+    (let ([procs (map (lambda (type-tag) (get-coercion type-tag one-type)) type-tags)])
+      (if (andmap identity procs) procs #f)))
+  (define (try-coercions type-tags args)
+    (let loop ([ttags type-tags])
+      (if (null? ttags)
+          #f
+          (let ([procs (get-coercions (car ttags) type-tags)])
+            (if procs
+                (map (lambda (proc arg) (apply proc arg)) procs args)
+                (loop (cdr ttags)))))))
+
+  (let* ([type-tags (map type-tag args)]
+         [proc (get op type-tags)])
+    (cond
+      [proc (apply proc (map contents args))]
+      [(null? type-tags) (no-method-error type-tags)]
+      [(same-type? type-tags) (no-method-error type-tags)]
+      [else
+        (let ([new-args (try-coercions type-tags args)])
+          (if new-args
+              (apply-generic/v3 op new-args)
+              (no-method-error type-tags)))])))
+
+; 1) 有可能存在多种强制方式, 其中方式A get 获取不到对应 method, 而方式B可以. 如果方式A先被触发, 则程序会报错而不是继续尝试方式B
+; 2) 可能存在多个参数同时处理无对应 method, 参数两两分别处理有对应 method 的情况
+)
+
+
+;;; ex 2.83
+(ex 83
+(@update! ([table (mcons '**numbers** '())]))
+
+(define types-list '(integer rational real complex))
+
+(define (divide-zero-error^ tag) (error tag "divide by zero"))
+
+(define (attach-tag^ type-tag contents) (cons type-tag contents))
+(define (type-tag^ datum)
+  (if (pair? datum)
+      (car datum)
+      (error 'type-tag "bad tagged datum: ~a" datum)))
+(define (contents^ datum)
+  (if (pair? datum)
+      (cdr datum)
+      (error 'contents "bad tagged datum: ~a" datum)))
+
+(define (install-integer-package^)
+  (define (tag z) (attach-tag^ 'integer z))
+  (define (make z) (tag (exact-floor z)))
+  (put 'make 'integer make)
+  (put 'value '(integer) identity)
+  (put '=0?^ '(integer)
+    (lambda (z) (= z 0)))
+  (put '+?^ '(integer)
+    (lambda (z) (> z 0)))
+  (put '-?^ '(integer)
+    (lambda (z) (< z 0)))
+  (put '=?^ '(integer integer)
+    (lambda (zx zy) (= zx zy)))
+  (put '-^ '(integer)
+    (lambda (z) (tag (- 0 z))))
+  (put '+^ '(integer integer)
+    (lambda (zx zy) (tag (+ zx zy))))
+  (put '-^ '(integer integer)
+    (lambda (zx zy) (tag (- zx zy))))
+  (put '*^ '(integer integer)
+    (lambda (zx zy) (tag (* zx zy))))
+  (put '/^ '(integer integer)
+    (lambda (zx zy)
+      (if (= 0 zy)
+          (divide-zero-error^ 'integer)
+          (if (= 0 (remainder zx zy))
+              (tag (/ zx zy))
+              (make-rational^ (tag zx) (tag zy))))))
+  (put 'gcd '(integer integer)
+    (lambda (zx zy) (tag (gcd zx zy))))
+  'done)
+
+(define (make-integer^ n) ((get 'make 'integer) n))
+(define (gcd^ nx ny) (apply-generic^ 'gcd nx ny))
+
+(define (install-rational-package^)
+  (define (numer z) (car z))
+  (define (denom z) (cdr z))
+  (define (tag z) (attach-tag^ 'rational z))
+  (define (make nn nd)
+    (cond
+      [(=0?^ nd) (error 'make-rational "denom is zero")]
+      [(=0?^ nn) (cons (make-integer^ 0) (make-integer^ 1))]
+      [else (let* ([ng (gcd^ nn nd)] [rnn (/^ nn ng)] [rnd (/^ nd ng)])
+              (if (+?^ rnd)
+                  (cons rnn rnd)
+                  (cons (-^ rnn) (-^ rnd))))]))
+  (define (reciprocal z) (make (denom z) (numer z)))
+  (define (minus z) (make (-^ (numer z)) (denom z)))
+  (define (add zx zy)
+    (let ([zxn (numer zx)] [zxd (denom zx)] [zyn (numer zy)] [zyd (denom zy)])
+      (make (+^ (*^ zxn zyd) (*^ zyn zxd))
+            (*^ zxd zyd))))
+  (define (sub zx zy) (add zx (minus zy)))
+  (define (mul zx zy)
+    (let ([zxn (numer zx)] [zxd (denom zx)] [zyn (numer zy)] [zyd (denom zy)])
+      (make (*^ zxn zyn) (*^ zxd zyd))))
+  (define (div zx zy) (mul zx (reciprocal zy)))
+  (put 'make 'rational (lambda (nn nd) (tag (make nn nd))))
+  (put 'numer '(rational) numer)
+  (put 'denom '(rational) denom)
+  (put 'value '(rational)
+    (lambda (z) (/ (value^ (numer z)) (value^ (denom z)))))
+  (put '=0?^ '(rational) (lambda (z) (=0?^ (numer z))))
+  (put '+?^ '(rational) (lambda (z) (+?^ (numer z))))
+  (put '-?^ '(rational) (lambda (z) (-?^ (numer z))))
+  (put '=?^ '(rational rational)
+    (lambda (zx zy)
+      (=?^ (*^ (numer zx) (denom zy))
+            (*^ (denom zx) (numer zy)))))
+  (put '-^ '(rational)
+    (lambda (z) (tag (minus z))))
+  (put 'reciprocal '(rational)
+    (lambda (z) (tag (reciprocal z))))
+  (put '+^ '(rational rational)
+    (lambda (zx zy) (tag (add zx zy))))
+  (put '-^ '(rational rational)
+    (lambda (zx zy) (tag (sub zx zy))))
+  (put '*^ '(rational rational)
+    (lambda (zx zy) (tag (mul zx zy))))
+  (put '/^ '(rational rational)
+    (lambda (zx zy) (tag (div zx zy))))
+  'done)
+
+(define (make-rational^ nn nd) ((get 'make 'rational) nn nd))
+(define (numer^ q) (apply-generic^ 'numer q))
+(define (denom^ q) (apply-generic^ 'denom q))
+(define (reciprocal^ q) (apply-generic^ 'reciprocal q))
+
+(define (install-real-package^)
+  (define delta 1e-9)
+  (define (tag z) (attach-tag^ 'real z))
+  (put 'make 'real tag)
+  (put 'value '(real) identity)
+  (put '=0?^ '(real)
+    (lambda (z) (= z 0)))
+  (put '+?^ '(real)
+    (lambda (z) (> z 0)))
+  (put '-?^ '(real)
+    (lambda (z) (< z 0)))
+  (put '=?^ '(real real)
+    (lambda (zx zy) (< (abs (- zx zy)) delta)))
+  (put '-^ '(real)
+    (lambda (z) (tag (- z))))
+  (put '+^ '(real real)
+    (lambda (zx zy) (tag (+ zx zy))))
+  (put '-^ '(real real)
+    (lambda (zx zy) (tag (- zx zy))))
+  (put '*^ '(real real)
+    (lambda (zx zy) (tag (* zx zy))))
+  (put '/^ '(real real)
+    (lambda (zx zy)
+      (if (= zy 0)
+          (divide-zero-error^ 'real)
+          (tag (/ zx zy)))))
+  'done)
+
+(define (make-real^ x) ((get 'make 'real) x))
+
+(define (install-complex-package^)
+  (define (tag z) (attach-tag^ 'complex z))
+  (define (make qr qi) (cons qr qi))
+  (define (real-part z) (car z))
+  (define (imag-part z) (cdr z))
+  (define (minus z)
+    (make (-^ (real-part z)) (-^ (imag-part z))))
+  (define (add zx zy)
+    (let ([zxr (real-part zx)] [zxi (imag-part zx)]
+          [zyr (real-part zy)] [zyi (imag-part zy)])
+      (make (+^ zxr zyr) (+^ zxi zyi))))
+  (define (sub zx zy) (add zx (minus zy)))
+  (define (mul zx zy)
+    (let ([zxr (real-part zx)] [zxi (imag-part zx)]
+          [zyr (real-part zy)] [zyi (imag-part zy)])
+      (make (-^ (*^ zxr zyr) (*^ zxi zyi))
+            (+^ (*^ zxr zyi) (*^ zxi zyr)))))
+  (define (div zx zy)
+    (let* ([zyr (real-part zy)] [zyi (imag-part zy)]
+           [mm (+^ (*^ zyr zyr) (*^ zyi zyi))]
+           [nzy (make (/^ zyr mm) (-^ (/^ zyi mm)))])
+      (mul zx nzy)))
+  (put 'make 'complex (lambda (qr qi) (tag (make qr qi))))
+  (put 'real-part '(complex) real-part)
+  (put 'imag-part '(complex) imag-part)
+  (put '=0?^ '(complex)
+    (lambda (z) (and (=0?^ (real-part z))
+                     (=0?^ (imag-part z)))))
+  (put '=?^ '(complex complex)
+    (lambda (zx zy)
+      (and (=?^ (real-part zx) (real-part zy))
+           (=?^ (imag-part zx) (imag-part zy)))))
+  (put '-^ '(complex)
+    (lambda (z) (tag (minus z))))
+  (put '+^ '(complex complex)
+    (lambda (zx zy) (tag (add zx zy))))
+  (put '-^ '(complex complex)
+    (lambda (zx zy) (tag (sub zx zy))))
+  (put '*^ '(complex complex)
+    (lambda (zx zy) (tag (mul zx zy))))
+  (put '/^ '(complex complex)
+    (lambda (zx zy) (tag (div zx zy))))
+  'done)
+
+(define (make-complex^ qr qi) ((get 'make 'complex) qr qi))
+(define (real-part^ c) (apply-generic^ 'real-part c))
+(define (imag-part^ c) (apply-generic^ 'imag-part c))
+
+(define (install-tools1-to-packages^)
+  (put 'raise '(integer)
+    (lambda (z) (make-rational^ (make-integer^ z) (make-integer^ 1))))
+  (put 'raise '(rational)
+    (lambda (z) (make-real^ (exact->inexact (value^ (make-rational^ (car z) (cdr z)))))))
+  (put 'raise '(real)
+    (lambda (z) (make-complex^ (make-real^ z) (make-real^ 0))))
+  (put 'project '(rational)
+    (lambda (z) (car z)))
+  (put 'project '(real)
+    (lambda (z) (make-integer^ z)))
+  (put 'project '(complex)
+    (lambda (z) (car z)))
+  'done)
+
+(define (no-method-error^ op type-tags)
+  (error 'apply-generic "no method for these types, ~a" (list op type-tags)))
+
+(define (apply-generic^/v1 op . args)
+  (let* ([type-tags (map type-tag^ args)]
+         [proc (get op type-tags)])
+    (if proc
+        (apply proc (map contents args))
+        (no-method-error^ op type-tags))))
+
+(define apply-generic^ apply-generic^/v1)
+
+(define (raise^ x) (apply-generic^ 'raise x))
+(define (project^ x) (apply-generic^ 'project x))
+
+(define (value^ x) (apply-generic^ 'value x))
+(define (=0?^ x) (apply-generic^ '=0?^ x))
+(define (+?^ x) (apply-generic^ '+?^ x))
+(define (-?^ x) (apply-generic^ '-?^ x))
+(define (=?^ x y) (apply-generic^ '=?^ x y))
+(define (+^ . args) (apply apply-generic^ (cons '+^ args)))
+(define (-^ . args) (apply apply-generic^ (cons '-^ args)))
+(define (*^ . args) (apply apply-generic^ (cons '*^ args)))
+(define (/^ . args) (apply apply-generic^ (cons '/^ args)))
+
+(define (install-number-packages^)
+  (install-integer-package^)
+  (install-rational-package^)
+  (install-real-package^)
+  (install-complex-package^))
+------
+(install-number-packages^)
+(install-tools1-to-packages^)
+
+(define n1 (make-integer^ 10))
+(define n2 (make-integer^ 3))
+(define q1 (make-rational^ n1 n2))
+(define r1 (make-real^ 3.14159))
+(@>> (raise^ n1) (raise^ q1) (raise^ r1))
+)
+
+
+;;; ex 2.84
+(ex 84
+(define (same-type?^ type-tags)
+  (let ([first (car type-tags)] [rest (cdr type-tags)])
+    (andmap (lambda (t) (eq? first t)) rest)))
+
+(define (higher-type^ type1 type2)
+  (let loop ([lst types-list])
+    (cond
+      [(null? lst) (error 'higher-type "unknown types: ~a, ~a" type1 type2)]
+      [(eq? (car lst) type1) type2]
+      [(eq? (car lst) type2) type1]
+      [else (loop (cdr lst))])))
+
+(define (apply-generic^/v2 op . args)
+  (define (raise-to src-type dst-type arg)
+    (let loop ([rst arg])
+      (let ([curr-type (type-tag^ rst)])
+        (if (eq? curr-type dst-type)
+          rst
+          (loop (raise^ rst))))))
+  (define (raises type-tags args)
+    (cond
+      [(or (null? args) (null? (cdr args))) args]
+      [else
+        (let loop ([last-type (car type-tags)]
+                   [done-args (cons (car args) '())]
+                   [rest-types (cdr type-tags)]
+                   [rest-args (cdr args)])
+          (if (null? rest-args)
+            done-args
+            (let* ([curr-arg (car rest-args)]
+                   [curr-type (car rest-types)]
+                   [htype (higher-type^ last-type curr-type)]
+                   [new-done-args
+                     (cond
+                       [(eq? htype last-type)
+                        (append done-args (cons (raise-to curr-type htype curr-arg) '()))]
+                       [else
+                        (append (map (lambda (e) (raise-to last-type htype e)) done-args)
+                                (cons curr-arg '()))])])
+              (loop htype
+                    new-done-args
+                    (cdr rest-types)
+                    (cdr rest-args)))))]))
+  (let* ([type-tags (map type-tag^ args)]
+         [proc (get op type-tags)])
+    (cond
+      [proc (apply proc (map contents args))]
+      [(null? args) (no-method-error^ op type-tags)]
+      [(same-type?^ type-tags) (no-method-error^ op type-tags)]
+      [else (apply apply-generic^/v2 (cons op (raises type-tags args)))])))
+
+(@update! ([apply-generic^ apply-generic^/v2]))
+------
+(install-number-packages^)
+(install-tools1-to-packages^)
+
+(define n1 (make-integer^ 10))
+(define n2 (make-integer^ 3))
+
+(define q1 (make-rational^ n1 n2))
+(define r1 (make-real^ 3.14159))
+
+(define c1 (make-complex^ n1 n2))
+(define c2 (make-complex^ q1 r1))
+
+(@>> c1 c2 (+^ c1 c2) (-^ c1 c2) (*^ c1 c2) (/^ c1 c2))
+(@>> "")
+
+(define q2 (make-rational^ (make-integer^ 40) (make-integer^ 3)))
+(?true (=?^ (+^ n1 q1) q2))
+(?true (=?^ n1 (make-rational^ (make-integer^ 10) (make-integer^ 1))))
+)
+
+
+;;; ex 2.85
+(ex 85
+(define (drop^ x)
+  (if (pair? x)
+    (let ([type-tag (car x)])
+      (cond
+        [(eq? type-tag (car types-list)) x]
+        [(member type-tag types-list)
+         (let* ([xp (project^ x)] [xr (raise^ xp)])
+           (if (=?^ xr x) (drop^ xp) x))]
+        [else x]))
+    x))
+
+(define (apply-generic^/v3 op . args)
+  (define drop-ops '(+^ -^ *^ /^))
+  (let ([rst (apply apply-generic^/v2 (cons op args))])
+    (if (member op drop-ops) (drop^ rst) rst)))
+
+(@update! ([apply-generic^ apply-generic^/v3]))
+------
+(install-number-packages^)
+(install-tools1-to-packages^)
+
+(define n0 (make-integer^ 0))
+(define n1 (make-integer^ 3))
+(define n2 (make-integer^ 10))
+(define n3 (make-integer^ -10))
+(define q1 (make-rational^ n2 n1))
+(define q2 (make-rational^ n3 n1))
+(define r1 (make-real^ 3.14159))
+(define c1 (make-complex^ q1 q2))
+(define c2 (make-complex^ q2 q1))
+(define c3 (make-complex^ q1 q1))
+
+(?true (=?^ (make-rational^ (make-integer^ 314159) (make-integer^ 100000))
+            (drop^ r1)))
+(?true (=?^ n0 (+^ q1 q2)))
+(?true (=?^ n0 (+^ c1 c2)))
+(?true (=?^ (make-rational^ (make-integer^ 200) (make-integer^ 9))
+            (*^ c1 c3)))
+)
+
+
+;;; ex 2.86
+(ex 86
+; 2.83 已支持, 只实现了实部和虚部, 未实现模和幅角
+(define (install-tools2-to-packages^)
+  (define (handle proc z)
+    (make-real^ (proc z)))
+  (put 'sin '(integer)
+    (lambda (z) (handle sin z)))
+  (put 'cos '(integer)
+    (lambda (z) (handle cos z)))
+  (put 'sin '(rational)
+    (lambda (z) (handle sin (value^ (make-rational^ (car z) (cdr z))))))
+  (put 'cos '(rational)
+    (lambda (z) (handle cos (value^ (make-rational^ (car z) (cdr z))))))
+  (put 'sin '(real)
+    (lambda (z) (handle sin z)))
+  (put 'cos '(real)
+    (lambda (z) (handle cos z)))
+  ;()
+  'done)
+
+(define (sin^ x) (apply-generic^ 'sin x))
+(define (cos^ x) (apply-generic^ 'cos x))
+------
+(install-number-packages^)
+(install-tools1-to-packages^)
+(install-tools2-to-packages^)
+
+(define n1 (make-integer^ 5))
+(define n2 (make-integer^ 3))
+(define q1 (make-rational^ n1 n2))
+(define c1 (make-real^ 1.57))
+
+(?~= (sin 5) (value^ (sin^ n1)))
+(?~= (cos 5) (value^ (cos^ n1)))
+(?~= (sin 5/3) (value^ (sin^ q1)))
+(?~= (cos 5/3) (value^ (cos^ q1)))
+(?~= (sin 1.57) (value^ (sin^ c1)))
+(?~= (cos 1.57) (value^ (cos^ c1)))
+)
+(run-ex 83 ~ 86)
+
+; (run-ex 1 ~ 43)
 ; (run-ex 53 ~ )
