@@ -2713,12 +2713,11 @@
       [else (loop (cdr lst))])))
 
 (define (apply-generic^/v2 op . args)
-  (define (raise-to src-type dst-type arg)
-    (let loop ([rst arg])
-      (let ([curr-type (type-tag^ rst)])
-        (if (eq? curr-type dst-type)
-          rst
-          (loop (raise^ rst))))))
+  (define (raise-to dst-type arg)
+    (let ([curr-type (type-tag^ arg)])
+      (if (eq? curr-type dst-type)
+        arg
+        (raise-to dst-type (raise^ arg)))))
   (define (raises type-tags args)
     (cond
       [(or (null? args) (null? (cdr args))) args]
@@ -2735,9 +2734,9 @@
                    [new-done-args
                      (cond
                        [(eq? htype last-type)
-                        (append done-args (cons (raise-to curr-type htype curr-arg) '()))]
+                        (append done-args (cons (raise-to htype curr-arg) '()))]
                        [else
-                        (append (map (lambda (e) (raise-to last-type htype e)) done-args)
+                        (append (map (lambda (e) (raise-to htype e)) done-args)
                                 (cons curr-arg '()))])])
               (loop htype
                     new-done-args
