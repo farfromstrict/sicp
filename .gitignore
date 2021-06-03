@@ -1,4 +1,4 @@
-.swp
-.bak
-.log
-.txt
+*.swp
+*.bak
+*.log
+*.txt
