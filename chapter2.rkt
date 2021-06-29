@@ -1,5 +1,5 @@
 #lang sicp
-(#%require "common.rkt")
+(#%require "lib/libs.rkt")
 (#%require racket
            (only math/number-theory prime?))
 
@@ -2645,7 +2645,7 @@
   (put 'raise '(integer)
     (lambda (z) (make-rational^ (make-integer^ z) (make-integer^ 1))))
   (put 'raise '(rational)
-    (lambda (z) (make-real^ (exact->inexact (value^ (make-rational^ (car z) (cdr z)))))))
+    (lambda (z) (make-real^ (exact->inexact (value^ (attach-tag^ 'rational z))))))
   (put 'raise '(real)
     (lambda (z) (make-complex^ (make-real^ z) (make-real^ 0))))
   (put 'project '(rational)
@@ -2827,9 +2827,9 @@
   (put 'cos '(integer)
     (lambda (z) (handle cos z)))
   (put 'sin '(rational)
-    (lambda (z) (handle sin (value^ (make-rational^ (car z) (cdr z))))))
+    (lambda (z) (handle sin (value^ (attach-tag^ 'rational z)))))
   (put 'cos '(rational)
-    (lambda (z) (handle cos (value^ (make-rational^ (car z) (cdr z))))))
+    (lambda (z) (handle cos (value^ (attach-tag^ 'rational z)))))
   (put 'sin '(real)
     (lambda (z) (handle sin z)))
   (put 'cos '(real)
@@ -2856,7 +2856,11 @@
 (?~= (sin 1.57) (value^ (sin^ c1)))
 (?~= (cos 1.57) (value^ (cos^ c1)))
 )
-(run-ex 83 ~ 86)
 
-; (run-ex 1 ~ 43)
-; (run-ex 53 ~ )
+
+;;; ex 2.87
+(ex 87
+)
+;(run-ex 87)
+
+(run-ex 1 ~ 86 but 44 ~ 52)
