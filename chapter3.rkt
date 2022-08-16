@@ -198,15 +198,19 @@
          0]
         [else x]))))
 
-((lambda ()
-  (define f (make-f))
-  (?== 0 (+ (f 0) (f 1)))
-))
+;; (+ (f 0) (f 1))
 
-((lambda ()
-  (define f (make-f))
-  (?== 1 (+ (f 1) (f 0)))
-))
+; 从左向右
+(let ([f (make-f)])
+  (let ([a (f 0)])
+    (let ([b (f 1)])
+      (?== 0 (+ a b)))))
+
+; 从右向左
+(let ([f (make-f)])
+  (let ([a (f 1)])
+    (let ([b (f 0)])
+      (?== 1 (+ a b)))))
 )
 
 
@@ -734,4 +738,168 @@
 )
 
 
-(run-ex 23)
+;;; ex 3.24
+(ex 24
+(define (make-table same-key?)
+  (let ([table (mcons '*table* '())])
+    (define (assoc key)
+      (let loop ([t (mcdr table)])
+        (cond
+          [(null? t) #f]
+          [(same-key? (mcar (mcar t)) key) (mcar t)]
+          [else (loop (mcdr t))])))
+    (define (lookup key)
+      (let ([node (assoc key)])
+        (if node
+            (mcdr node)
+            #f)))
+    (define (insert! key value)
+      (let ([node (assoc key)])
+        (if node
+            (set-cdr! node value)
+            (let ([new-node (mcons (mcons key value) (mcdr table))])
+              (set-cdr! table new-node)))))
+    (define (->list)
+      (let loop ([t table] [rst '()])
+        (cond
+          [(null? (mcdr t)) rst]
+          [else (loop (mcdr t) (append rst (list (mcar (mcdr t)))))])))
+    (define (dispatch m)
+      (cond
+        [(eq? m 'lookup) lookup]
+        [(eq? m 'insert!) insert!]
+        [(eq? m '->list) (->list)]))
+    dispatch))
+
+(define table (make-table (lambda (k1 k2) (< (abs (- k1 k2)) 0.1))))
+((table 'insert!) 10 10)
+((table 'insert!) 20 20)
+((table 'insert!) 30 30)
+(?== 20 ((table 'lookup) 19.98))
+(?== 30 ((table 'lookup) 30.08))
+(?false ((table 'lookup) 20.2))
+)
+
+
+;;; ex 3.25
+(ex 25
+(define (make-table)
+  (define TABLE_HEADER '*table*)
+  (define VALUE_FLAG '*value*)
+  (define (cons-table cell) (mcons TABLE_HEADER (mcons cell '())))
+  (define (init-table) (mcons TABLE_HEADER '()))
+  (define (table-header t) (mcar t))
+  (define (table-cells t) (mcdr t))
+  (define (table? t) (and (mpair? t) (eq? TABLE_HEADER (table-header t))))
+  (define (empty? t) (null? (table-cells t)))
+  (define (build-cell key data subs) (mcons (mcons key data) (or subs (init-table))))
+  (define (cell-key cell) (mcar (mcar cell)))
+  (define (cell-data cell) (mcdr (mcar cell)))
+  (define (cell-subs cell) (mcdr cell))
+  (define (build-cell-data value) (mcons VALUE_FLAG value))
+  (define (cell-has-value? cell) (and (mpair? cell) (mpair? (cell-data cell)) (eq? VALUE_FLAG (mcar (cell-data cell)))))
+  (define (set-cell-subs! cell t) (set-cdr! cell t))
+  (define (cell-value cell) (mcdr (cell-data cell)))
+  (define (set-cell-value! cell value) (set-cdr! (mcar cell) (build-cell-data value)))
+  (define full-table (init-table))
+  (define (assoc-key t key)
+    (cond
+      [(not (table? t)) #f]
+      [else
+       (let loop ([cells (table-cells t)])
+         (cond
+           [(null? cells) #f]
+           [(eq? key (cell-key (mcar cells))) (mcar cells)]
+           [else (loop (mcdr cells))]))]))
+  (define (assoc-keys t keys)
+    (cond
+      [(null? keys) #f]
+      [(null? t) #f]
+      [(null? (cdr keys)) (assoc-key t (car keys))]
+      [else
+       (let ([cell (assoc-key t (car keys))])
+         (cond
+           [(not cell) #f]
+           [else (assoc-keys (cell-subs cell) (cdr keys))]))]))
+  (define (lookup keys)
+    (let ([cell (assoc-keys full-table keys)])
+      (cond
+        [(not cell) #f]
+        [(cell-has-value? cell) (cell-value cell)]
+        [else #f])))
+  (define (build-table keys value)
+    (let loop ([keys (reverse keys)] [start #t] [rst #f])
+      (cond
+        [(null? keys) rst]
+        [else
+         (let ([first-key (car keys)] [rest-keys (cdr keys)])
+           (loop rest-keys #f (cons-table (build-cell first-key (if start (build-cell-data value) '()) rst))))])))
+  (define (insert-cell! t cell)
+    (set-cdr! t (mcons cell (table-cells t))))
+  (define (insert-keys-value! t keys value)
+    (cond
+      [(null? keys) #f]
+      [(null? (cdr keys))
+       (let ([cell (assoc-key t (car keys))])
+         (cond
+           [cell (set-cell-value! cell value)]
+           [else (insert-cell! t (build-cell (car keys) (build-cell-data value) #f))]))]
+      [else
+       (let ([first-key (car keys)] [rest-keys (cdr keys)])
+         (let ([cell (assoc-key t first-key)])
+           (cond
+             [(not cell)
+              (insert-cell! t (build-cell first-key '() (build-table rest-keys value)))]
+             [(null? (cell-subs cell))
+              (set-cell-subs! cell (build-table rest-keys value))]
+             [else (insert-keys-value! (cell-subs cell) rest-keys value)])))]))
+  (define (insert! keys value)
+    (insert-keys-value! full-table keys value))
+  (define (print-table t n)
+    (define (n-space n)
+      (let loop ([t n] [rst ""])
+        (cond
+          [(= t 0) rst]
+          [else (loop (- t 1) (format "~a~a" rst " "))])))
+    (define spaces (n-space n))
+    (define (print-cell cell)
+      (let ([key (cell-key cell)] [data (cell-data cell)] [subs (cell-subs cell)])
+        (printf "~a- [~a : ~a]\n" spaces key (if (null? data) "" (mcdr data)))
+        (print-table subs (+ n 2))))
+    (printf "~a*table*\n" spaces)
+    (cond
+      [(or (null? t) (empty? t)) (void)]
+      [else
+       (let loop ([cells (table-cells t)])
+         (cond
+           [(null? cells) (void)]
+           [else (print-cell (mcar cells)) (loop (mcdr cells))]))]))
+  (define (dispatch m)
+    (cond
+      [(eq? m 'raw) full-table]
+      [(eq? m 'empty?) (empty? full-table)]
+      [(eq? m 'print) (print-table full-table 0)]
+      [(eq? m 'insert!) insert!]
+      [(eq? m 'lookup) lookup]))
+  dispatch)
+
+(define table (make-table))
+(?true (table 'empty?))
+(?false ((table 'lookup) '(a b c)))
+((table 'insert!) '(a b c) 10)
+(?false (table 'empty?))
+((table 'insert!) '(a b) 20)
+((table 'insert!) '(d) 30)
+((table 'insert!) '(a b e) 40)
+(?== 10 ((table 'lookup) '(a b c)))
+(?== 20 ((table 'lookup) '(a b)))
+(?== 30 ((table 'lookup) '(d)))
+(?== 40 ((table 'lookup) '(a b e)))
+(?false ((table 'lookup) '(a)))
+(?false ((table 'lookup) '()))
+(?false ((table 'lookup) '(e)))
+; (table 'print)
+)
+
+
+(run-ex 25)

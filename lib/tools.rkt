@@ -1,5 +1,5 @@
 #lang racket
-(provide average int/list join diff-ratio mlist list->mlist)
+(provide average int/list join diff-ratio mlist list->mlist repeat)
 
 (define (average e . w)
   (let ([sum (+ e (apply + w))]
@@ -40,3 +40,8 @@
        (cond
          [(pair? head) (mcons (list->mlist head) (list->mlist (cdr lst)))]
          [else (mcons head (list->mlist (cdr lst)))]))]))
+
+(define (repeat n proc)
+  (let loop ([t n])
+    (cond
+      [(> t 0) (proc) (loop (- t 1))])))
