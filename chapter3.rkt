@@ -338,8 +338,8 @@
 ;;        |                     |
 ;;        -----------------------
 ;; (last-pair z) => 无限循环
-(@>> z)    ; #0=(a b c . #0#)
-(@>> (mcdr z))    ; #0=(b c a . #0#)
+(@>> z)    ;   #0=(a b c .   #0#)
+(@>> (mcdr z))    ;   #0=(b c a .   #0#)
 )
 
 
@@ -902,4 +902,166 @@
 )
 
 
-(run-ex 25)
+;;; ex 3.26
+(ex 26
+(define (make-table)
+  (define (make-tree entry lb rb) (mcons entry (mcons lb rb)))
+  (define (make-entry key value) (mcons key value))
+  (define (entry tree) (mcar tree))
+  (define (entry-key tree) (mcar (entry tree)))
+  (define (entry-value tree) (mcdr (entry tree)))
+  (define (left-branch tree) (mcar (mcdr tree)))
+  (define (right-branch tree) (mcdr (mcdr tree)))
+  (define (set-entry-value! tree value) (set-cdr! (entry tree) value))
+  (define (set-left-branch! tree branch) (set-car! (mcdr tree) branch))
+  (define (set-right-branch! tree branch) (set-cdr! (mcdr tree) branch))
+  (define (empty? tree) (null? tree))
+  (define (lookup key tree)
+    (cond
+      [(empty? tree) #f]
+      [(= key (entry-key tree)) (entry-value tree)]
+      [(< key (entry-key tree)) (lookup key (left-branch tree))]
+      [else (lookup key (right-branch tree))]))
+  (define (insert! key value tree)
+    (cond
+      [(null? tree) (void)]
+      [(= key (entry-key tree)) (set-entry-value! tree value)]
+      [(< key (entry-key tree))
+       (let ([branch (left-branch tree)])
+         (cond
+           [(null? branch) (set-left-branch! tree (make-tree (make-entry key value) '() '()))]
+           [else (insert! key value branch)]))]
+      [else
+       (let ([branch (right-branch tree)])
+         (cond
+           [(null? branch) (set-right-branch! tree (make-tree (make-entry key value) '() '()))]
+           [else (insert! key value branch)]))]))
+  (define table-tree '())
+  (define (dispatch m)
+    (cond
+      [(eq? m 'empty?) (empty? table-tree)]
+      [(eq? m 'insert!)
+       (lambda (key value)
+         (cond
+           [(null? table-tree) (set! table-tree (make-tree (make-entry key value) '() '()))]
+           [else (insert! key value table-tree)]))]
+      [(eq? m 'lookup) (lambda (key) (lookup key table-tree))]
+      [(eq? m 'print) (printf "~a\n" table-tree)]))
+  dispatch)
+
+(define table (make-table))
+(?true (table 'empty?))
+(?false ((table 'lookup) 'a))
+(for ([k (string->list "helloworld")]
+      [v '(10 20 30 40 50 60 70 80 90 100)])
+  ((table 'insert!) (char->integer k) v))
+(?false (table 'empty?))
+(?== 10 ((table 'lookup) (char->integer #\h)))
+(?== 20 ((table 'lookup) (char->integer #\e)))
+(?== 90 ((table 'lookup) (char->integer #\l)))
+(?== 70 ((table 'lookup) (char->integer #\o)))
+(?== 60 ((table 'lookup) (char->integer #\w)))
+(?== 80 ((table 'lookup) (char->integer #\r)))
+(?== 100 ((table 'lookup) (char->integer #\d)))
+)
+
+
+;;; ex 3.27
+(ex 27
+;;   #000 [global: {fib => |`(n)...` . ->global|} {memoize => |`(f)...` . ->global|}] `(define memo-fib (memoize ...))` 
+;;   #001 [global: {fib} {memoize}] `(memoize (lambda (n) ...))`
+;;   #002 [E1: ->global {f => (lambda (n) ...)}] `(memoize ...)`
+;;   #003 [E1: ->global {f => ...}] `(lambda (n) ...)`
+;;   #004 [E1: ->global {f => |`(n) (cond ...)` . ->E1|}] `(memoize ...)`
+;;   #005 [E1: ->global {f}] `(let ([table (make-table)]) ...)`
+;;   #006 [E1: ->global {f}] `((lambda (table)...) (make-table))`
+;;   #007 [E1: ->global {f} {X1 => |`(table)...` . ->E1|}] `X1 (make-table)`
+;;   #008 [E2: ->E1 {table => '()}] `(lambda (x) ...)`
+;;   #009 [E2: ->E1 {table} {X2 => |`(x)...` . ->E2|}] `X2`
+;;   #010 [global: {fib} {memoize}] `(define memo-fib X2)`
+;;   #011 [global: {fib} {memoize} {memo-fib => |`(x) (let ([pcr ...]) ...)` . ->E2|}] `(memo-fib 3)`
+;;   #012 [E3: ->E2 {x => 3}] `(let ([pcr ...]) ...)`
+;;   #013 [E3: ->E2 {x => 3}] `((lambda (pcr) ...) (lookup x table))`
+;;   #014 [E3: ->E2 {x => 3}] `((lambda (pcr) ...) (lookup 3 '()))`
+;;   #015 [E3: ->E2 {x => 3} {X3 => |`(pcr)...` . ->E3|}] `(X3 #f)`
+;;   #016 [E4: ->E3 {pcr => #f}] `(or #f ...)`
+;;   #017 [E4: ->E3 {pcr}] `(let ([result (f x)]) ...)`
+;;   #018 [E4: ->E3 {pcr}] `((lambda (result) ...) (f x))`
+;;   #019 [E4: ->E3 {pcr} {X4 => |`(result)...` . ->E4|}] `(X4 (f 3))`
+;; * #020 [E4: ->E3 {pcr} {X4 => |`(result)...` . ->E4|}] `(f 3)`
+;;   #021 [E5: ->E1 {n => 3}] `(cond ...)`
+;;   #022 [E5: ->E1 {n => 3}] `(+ (memo-fib 2) (memo-fib 1))`
+;;   #023 [E5: ->E1 {n => 3}] `(memo-fib 2)`
+;;   #024 [E6: ->E2 {x => 2}] `(let ([pcr ...]) ...)`
+;;   #025 [E6: ->E2 {x => 2}] `((lambda (pcr) ...) (lookup 2 '())))`
+;;   #026 [E6: ->E2 {x => 2} {X5 => |`(pcr)...` . ->E6|}] `(X5 #f)`
+;;   #027 [E7: ->E6 {pcr => #f}] `(or #f ...)`
+;;   #028 [E7: ->E6 {pcr}] `(let ([result (f x)]) ...)`
+;;   #029 [E7: ->E6 {pcr}] `((lambda (result) ...) (f x))`
+;;   #030 [E7: ->E6 {pcr} {X6 => |`(result)...` . ->E7|}] `(X6 (f 2))`
+;; * #031 [E7: ->E6 {pcr} {X6 => |`(result)...` . ->E7|}] `(f 2)`
+;;   #032 [E8: ->E1 {n => 2}] `(cond ...)`
+;;   #033 [E8: ->E1 {n => 2}] `(+ (memo-fib 1) (memo-fib 0))`
+;;   #034 [E8: ->E1 {n => 2}] `(memo-fib 1)`
+;;   #035 [E9: ->E2 {x => 1}] `(let ([pcr ...]) ...)`
+;;   #036 [E9: ->E2 {x => 1}] `((lambda (pcr) ...) (lookup 1 '()))`
+;;   #037 [E9: ->E2 {x => 1} {X7 => |`(pcr)...` . ->E9|}] `(X7 #f)`
+;;   #038 [E10: ->E9 {pcr => #f}] `(or #f ...)`
+;;   #039 [E10: ->E9 {pcr}] `(let ([result (f x)]) ...)`
+;;   #040 [E10: ->E9 {pcr}] `((lambda (result) ...) (f x))`
+;;   #041 [E10: ->E9 {pcr} {X8 => |`(result)...` . ->E10|}] `(X8 (f 1))`
+;; * #042 [E10: ->E9 {pcr} {X8 => |`(result)...` . ->E10|}] `(f 1)`
+;;   #043 [E11: ->E1 {n => 1}] `(cond ...)`
+;;   #044 [E11: ->E1 {n => 1}] `1`
+;;   #045 [E10: ->E9 {pcr} {X8}] `(X8 1)`
+;;   #046 [E11: ->E10 {result => 1}] `(insert! x result table) result`
+;;   #047 [E11: ->E10 {result => 1}] `(insert! 1 1 table) 1`
+;;   #048 [E2: ->E1 {table => '((1 1))}]
+;;   #049 [E11: ->E10 {result => 1}] `1`
+;;   #050 [E8: ->E1 {n => 2}] `(+ 1 (memo-fib 0))`
+;;   #051 [E8: ->E1 {n => 2}] `(memo-fib 0)`
+;;   #052 [E12: ->E2 {x => 0}] `(let ([pcr ...]) ...)`
+;;   #053 [E12: ->E2 {x => 0}] `((lambda (pcr) ...) (lookup 0 '((1 1))))`
+;;   #054 [E12: ->E2 {x => 0} {X9 => |`(pcr)...` . ->E12|}] `(X9 #f)`
+;;   #055 [E13: ->E12 {pcr => #f}] `(or #f ...)`
+;;   #056 [E13: ->E12 {pcr}] `(let ([result (f x)]) ...)`
+;;   #057 [E13: ->E12 {pcr}] `((lambda (result) ...) (f x))`
+;;   #058 [E13: ->E12 {pcr} {X10 => |`(result)...` . ->E13|}] `(X10 (f 0))`
+;; * #059 [E13: ->E12 {pcr} {X10 => |`(result)...` . ->E13|}] `(f 0)`
+;;   #060 [E14: ->E1 {n => 0}] `(cond ...)`
+;;   #061 [E14: ->E1 {n => 0}] `1`
+;;   #062 [E13: ->E12 {pcr} {X10}] `(X10 1)`
+;;   #063 [E14: ->E13 {result => 1}] `(insert! x result table) result`
+;;   #064 [E14: ->E13 {result => 1}] `(insert! 0 1 table) 1`
+;;   #065 [E2: ->E1 {table => '((1 1) (0 1))}]
+;;   #066 [E14: ->E13 {result => 0}] `1`
+;;   #067 [E8: ->E1 {n => 2}] `(+ 1 1)`
+;;   #068 [E8: ->E1 {n => 2}] `2`
+;;   #069 [E7: ->E6 {pcr} {X6 => |`(result)...` . ->E7|}] `(X6 2)`
+;;   #069 [E15: ->E7 {result => 2}] `(insert! x result table) result`
+;;   #070 [E15: ->E7 {result => 2}] `(insert! 2 2 table) 2`
+;;   #071 [E2: ->E1 {table -> '((1 1) (0 1) (2 2))}]
+;;   #072 [E15: ->E7 {result => 2}] `2`
+;;   #073 [E5: ->E1 {n => 3}] `(+ 2 (memo-fib 1))`
+;;   #074 [E5: ->E1 {n => 3}] `(memo-fib 1)`
+;;   #075 [E16: ->E2 {x => 1}] `(let ([pcr ...]) ...)`
+;;   #076 [E16: ->E2 {x => 1}] `((lambda (pcr) ...) (lookup 1 '((1 1) (0 1) (2 2))))`
+;;   #077 [E16: ->E2 {x => 1} {X11 => |`(pcr)...` . ->E16|}] `(X11 1)`
+;;   #078 [E17: ->E16 {pcr => 1}] `(or 1 ...)`
+;;   #079 [E17: ->E16 {pcr => 1}] `1`
+;;   #080 [E5: ->E1 {n => 3}] `(+ 2 1)`
+;;   #081 [E5: ->E1 {n => 3}] `3`
+;;   #082 [E4: ->E3 {pcr} {X4 => |`(result)...` . ->E4|}] `(X4 3)`
+;;   #083 [E18: ->E4 {result => 3}] `(insert! x result table) result`
+;;   #084 [E18: ->E4 {result => 3}] `(insert! 3 3 table) 3`
+;;   #085 [E2: ->E1 {table => '((1 1) (0 1) (2 2) (3 3))}]
+;;   #086 [E18: ->E4 {result => 3}] `3`
+;;   #087 [global: {fib} {memoize} {memo-fib}] `3`
+
+;; 关键步骤 (f x) 调用次数 4 次 = n + 1
+;;
+;; (define memo-fib (memoize fib)) 不符合预期, (f x) => (fib x) 仅在fib函数中递归, table不起作用
+)
+
+
+(run-ex 27)
