@@ -567,7 +567,7 @@
     [else
      (set-front-ptr! queue (mcdr (front-ptr queue)))
      queue]))
-
+------
 (define (queue->list queue)
   (cond
     [(empty-queue? queue) '()]
@@ -1064,4 +1064,401 @@
 )
 
 
-(run-ex 27)
+;;; ex 3.28
+(ex 28
+(define (make-time-segment time queue) (mcons time queue))
+
+(define (segment-time s) (mcar s))
+
+(define (segment-queue s) (mcdr s))
+
+(define (make-agenda) (mcons 0 '()))
+
+(define (current-time agenda) (mcar agenda))
+
+(define (set-current-time! agenda time) (set-car! agenda time))
+
+(define (segments agenda) (mcdr agenda))
+
+(define (set-segments! agenda segments) (set-cdr! agenda segments))
+
+(define (first-segment agenda) (mcar (segments agenda)))
+
+(define (rest-segments agenda) (mcdr (segments agenda)))
+
+(define (empty-agenda? agenda) (null? (segments agenda)))
+
+(define (add-to-agenda! time action agenda)
+  (define (belongs-before? segments)
+    (or (null? segments)
+        (< time (segment-time (mcar segments)))))
+  (define (make-new-time-segment time action)
+    (let ([q (make-queue)])
+      (insert-queue! q action)
+      (make-time-segment time q)))
+  (define (add-to-segments! segments)
+    (cond
+      [(= time (segment-time (mcar segments)))
+       (insert-queue! (segment-queue (mcar segments)) action)]
+      [else
+       (let ([rest (mcdr segments)])
+         (cond
+           [(belongs-before? rest)
+            (set-cdr! segments (mcons (make-new-time-segment time action) (mcdr segments)))]
+           [else (add-to-segments! rest)]))]))
+  (let ([segments (segments agenda)])
+    (cond
+      [(belongs-before? segments)
+       (set-segments! agenda (mcons (make-new-time-segment time action) segments))]
+      [else (add-to-segments! segments)])))
+
+(define (first-agenda-item agenda)
+  (cond
+    [(empty-agenda? agenda) (error 'first-agenda-time "Agenda is empty")]
+    [else
+     (let ([first-seg (first-segment agenda)])
+       (set-current-time! agenda (segment-time first-seg))
+       (front-queue (segment-queue first-seg)))]))
+
+(define (remove-first-agenda-item! agenda)
+  (let ([q (segment-queue (first-segment agenda))])
+    (delete-queue! q)
+    (cond
+      [(empty-queue? q)
+       (set-segments! agenda (rest-segments agenda))])))
+
+(define the-agenda (make-agenda))
+
+(define (after-delay delay action)
+  (add-to-agenda!
+    (+ delay (current-time the-agenda))
+    action
+    the-agenda))
+
+(define (propagate)
+  (cond
+    [(empty-agenda? the-agenda) 'done]
+    [else
+     (let ([first-item (first-agenda-item the-agenda)])
+       (first-item)
+       (remove-first-agenda-item! the-agenda)
+       (propagate))]))
+
+(define (make-wire)
+  (let ([signal-value -1] [action-procedures '()])
+    (define (set-my-signal! new-value)
+      (if (not (= signal-value new-value))
+          (begin (set! signal-value new-value)
+                 (call-each action-procedures))
+          'done))
+    (define (accept-action-procedure! proc)
+      (set! action-procedures (mcons proc action-procedures))
+      (proc))
+    (define (dispatch m)
+      (cond
+        [(eq? m 'get-signal) signal-value]
+        [(eq? m 'set-signal!) set-my-signal!]
+        [(eq? m 'add-action!) accept-action-procedure!]
+        [else (error 'make-wire "Unknown operation: ~a" m)]))
+    dispatch))
+
+(define (call-each procedures)
+  (cond
+    [(null? procedures) 'done]
+    [else
+     ((mcar procedures))
+     (call-each (mcdr procedures))]))
+
+(define (get-signal wire) (wire 'get-signal))
+(define (set-signal! wire new-value) ((wire 'set-signal!) new-value))
+(define (add-action! wire action-procedure) ((wire 'add-action!) action-procedure))
+
+(define (logic-or s1 s2)
+  (cond
+    [(or (= s1 -1) (= s2 -1)) -1]
+    [(= s1 1) 1]
+    [(= s2 1) 1]
+    [else 0]))
+
+(define (probe name wire)
+  (add-action!
+    wire
+    (lambda ()
+      (let ([value (get-signal wire)] [time (current-time the-agenda)])
+        (cond
+          [(not (= value -1))
+           (printf "[~a] ~a : ~a\n" time name value)])))))
+
+(define or-gate-delay 5)
+
+(define (or-gate a1 a2 output)
+  (define (or-action-procedure)
+    (let ([new-value (logic-or (get-signal a1) (get-signal a2))])
+      (after-delay
+        or-gate-delay
+        (lambda () (set-signal! output new-value)))))
+  (add-action! a1 or-action-procedure)
+  (add-action! a2 or-action-procedure)
+  'ok)
+------
+(set! the-agenda (make-agenda))
+(define in1 (make-wire))
+(define in2 (make-wire))
+(define out (make-wire))
+(probe 'in1 in1)
+(probe 'in2 in2)
+(probe 'out out)
+(or-gate in1 in2 out)
+(set-signal! in1 1)
+(set-signal! in2 0)
+(propagate)
+)
+
+
+;;; ex 3.29
+(ex 29
+(define (logic-not s)
+  (cond
+    [(= s -1) -1]
+    [(= s 0) 1]
+    [(= s 1) 0]))
+
+(define (logic-and s1 s2)
+  (cond
+    [(or (= s1 -1) (= s2 -1)) -1]
+    [(= s1 0) 0]
+    [(= s2 0) 0]
+    [else 1]))
+
+(define inverter-delay 2)
+
+(define (inverter input output)
+  (define (invert-input)
+    (let ([new-value (logic-not (get-signal input))])
+      (after-delay
+        inverter-delay
+        (lambda () (set-signal! output new-value)))))
+  (add-action! input invert-input)
+  'ok)
+
+(define and-gate-delay 3)
+
+(define (and-gate a1 a2 output)
+  (define (and-action-procedure)
+    (let ([new-value (logic-and (get-signal a1) (get-signal a2))])
+      (after-delay
+        and-gate-delay
+        (lambda () (set-signal! output new-value)))))
+  (add-action! a1 and-action-procedure)
+  (add-action! a2 and-action-procedure)
+  'ok)
+------
+;; a ^ b = ~((~a) * (~b))
+;; or-gate-delay = 2 * inverter-delay + and-gate-delay
+
+(define (or-gate a1 a2 output)
+  (let ([b1 (make-wire)]
+        [b2 (make-wire)]
+        [c1 (make-wire)])
+    (inverter a1 b1)
+    (inverter a2 b2)
+    (and-gate b1 b2 c1)
+    (inverter c1 output)
+    'ok))
+
+(set! the-agenda (make-agenda))
+(define in1 (make-wire))
+(define in2 (make-wire))
+(define out (make-wire))
+(probe 'in1 in1)
+(probe 'in2 in2)
+(probe 'out out)
+(or-gate in1 in2 out)
+(set-signal! in1 1)
+(set-signal! in2 0)
+(propagate)
+)
+
+
+;;; ex 3.30
+(ex 30
+;; half-adder-delay:c = and-gate-delay = 3
+;; half-adder-delay:s = (max (and-gate-delay + inverter-delay) or-gate-delay) + and-gate-delay = 8
+;; half-adder-delay = 8
+(define (half-adder a b s c)
+  (let ([d (make-wire)] [e (make-wire)])
+    (or-gate a b d)
+    (and-gate a b c)
+    (inverter c e)
+    (and-gate d e s)
+    'ok))
+
+;; full-adder-delay:sum = 2 * half-adder-delay:s = 16
+;; full-adder-delay:c-out = half-adder-delay:s + half-adder-delay:c + or-gate-delay = 16
+;; full-adder-delay = 16
+(define (full-adder a b c-in sum c-out)
+  (let ([s (make-wire)] [c1 (make-wire)] [c2 (make-wire)])
+    (half-adder b c-in s c1)
+    (half-adder a s sum c2)
+    (or-gate c1 c2 c-out)
+    'ok))
+------
+(define (make-wires n) (build-list 5 (lambda (x) (make-wire))))
+
+;; ripple-carry-adder-delay = n * full-adder-delay
+(define (ripple-carry-adder An Bn Sn C)
+  (define (ref lst x) (list-ref lst (- x 1)))
+  (define n (length An))
+  (define Cn (make-wires n))
+  (for ([i (reverse (range 1 (+ n 1)))])
+    (full-adder
+      (ref An i)
+      (ref Bn i)
+      (ref Cn i)
+      (ref Sn i)
+      (if (= i 1) C (ref Cn (- i 1)))))
+  (set-signal! (ref Cn n) 0)
+  'ok)
+
+(define (set-signals! wires signals)
+  (for-each
+    (lambda (wire signal) (set-signal! wire signal))
+    wires signals))
+
+(define (probes name wires)
+  (for-each
+    (lambda (wire)
+      (add-action!
+        wire
+        (lambda ()
+          (let ([signals (map get-signal wires)])
+            (cond
+              [(memq -1 signals) (void)]
+              [else (printf "[~a] ~a : ~a\n" (current-time the-agenda) name signals)])))))
+    wires))
+
+(set! the-agenda (make-agenda))
+(define n 5)
+(define An (make-wires n))
+(define Bn (make-wires n))
+(define Sn (make-wires n))
+(define C (make-wire))
+(ripple-carry-adder An Bn Sn C)
+(probes 'A An)
+(probes 'B Bn)
+(probes 'S Sn)
+(probe 'C C)
+(set-signals! An '(1 0 1 1 1))
+(set-signals! Bn '(1 0 0 1 1))
+(propagate)
+)
+
+
+;;; ex 3.31
+(ex 31
+(define (probe/v1 name wire)
+  (add-action!
+    wire
+    (lambda ()
+      (printf "[~a] ~a : ~a\n" (current-time the-agenda) name (get-signal wire)))))
+
+(set the-agenda (make-agenda))
+(define a (make-wire))
+(define b (make-wire))
+(define s (make-wire))
+(define c (make-wire))
+(probe/v1 'a a)
+(probe/v1 'b b)
+(probe/v1 's s)
+(probe/v1 'c c)
+
+(half-adder a b s c)
+(set-signal! a 1)
+(set-signal! b 1)
+(propagate)
+
+;; 如果不调用过程, 则动作不会被立即触发
+;; 对于书中示例, 即probe调用时不会立即输出wire当前值(即初始值), 只有后续set-signal!才能触发输出
+)
+
+
+;;; ex 3.32
+(ex 32
+;; 保证先加入的动作先处理
+(define (test bfirst predicate-value)
+  (let ([a (make-wire)] [b (make-wire)] [out (make-wire)])
+    (probe 'a a)
+    (probe 'b b)
+    (probe 'out out)
+    (and-gate a b out)
+    (set! the-agenda (make-agenda))
+    (set-signal! a 0)
+    (set-signal! b 1)  ; out --> 0
+    (cond
+      [bfirst
+       (after-delay 5 (lambda () (set-signal! b 0)))  ; out --> 0
+       (after-delay 5 (lambda () (set-signal! a 1)))  ; out --> 1
+       (void)]
+      [else
+       (after-delay 5 (lambda () (set-signal! a 1)))  ; out --> 1
+       (after-delay 5 (lambda () (set-signal! b 0)))  ; out --> 0
+       (void)])
+    (propagate)
+    (?== predicate-value (get-signal out))))
+
+(test #f 0)
+(printf "\n")
+(test #t 0)
+(printf "----------\n")
+
+;; FIFO, 输出信息变化为:
+;; [0](0,1 -> 0) => [5](1,1 -> 1) => [5](1,0 -> 0)
+;; [0](0,1 -> 0) => [5](0,0 -> 0) => [5](1,0 -> 0)
+;; 最终结果都正确
+
+(define (make-queue/lifo)
+  (let ([queue (mcons '*lifo* '())])
+    (define (empty?) (null? (mcdr queue)))
+    (define (insert! item)
+      (set-cdr! queue (mcons item (mcdr queue))))
+    (define (delete!)
+      (cond
+        [(not (empty?)) (set-cdr! queue (mcdr (mcdr queue)))]))
+    (define (dispatch m)
+      (cond
+        [(eq? m 'empty?) (empty?)]
+        [(eq? m 'front) (mcar (mcdr queue))]
+        [(eq? m 'insert!) insert!]
+        [(eq? m 'delete!) (delete!)]
+        [(eq? m 'print) (printf "~a\n" queue)]))
+    dispatch))
+
+(@update ([make-queue make-queue/lifo]
+          [empty-queue? (lambda (q) (q 'empty?))]
+          [front-queue (lambda (q) (q 'front))]
+          [insert-queue! (lambda (q item) ((q 'insert!) item))]
+          [delete-queue! (lambda (q) (q 'delete!))])
+  (test #f 0)
+  (printf "\n")
+  (test #t 1))
+
+;; 关键点: and-gate 的 and-action-procedure 方法, 是先计算当前 output 的预期值, 再调用 after-delay 放入待处理表队列
+;; LIFO, 输出信息变化为:
+;;
+;; <a先b后> [0](0,1 -> 0) => [5](1,1 -> 1) => [5](1,0 -> 0)
+;; [5]时刻 队列为 (*lifo* (set-signal! b 0) (set-signal! a 1))
+;; 先处理 b <- 0, 计算得output预期值为 0 * 0 = 0, 将 (set-signal! out 0) 放入 [8]时刻 队列
+;; 再处理 a <- 1, 计算得output预期值为 1 * 0 = 0, 将 (set-signal! out 0) 放入 [8]时刻 队列
+;; [8]时刻队列为 (*lifo* (set-signal! out 0) (set-signal! out 0))
+;; 最终结果 out <- 0 **正确**
+;;
+;; <b先a后> [0](0,1 -> 0) => [5](0,0 -> 0) => [5](1,0 -> 0)
+;; [5]时刻 队列为 (*lifo* (set-signal! a 1) (set-signal! b 0))
+;; 先处理 a <- 1, 计算得output预期值为 1 * 1 = 1, 将 (set-signal! out 1) 放入 [8]时刻 队列
+;; 再处理 b <- 0, 计算得output预期值为 1 * 0 = 0, 将 (set-signal! out 0) 放入 [8]时刻 队列
+;; [8]时刻队列为 (*lifo* (set-signal! out 0) (set-signal! out 1))
+;; 最终结果 out <- 1 **错误**
+)
+
+
+(run-ex 1 ~ 32)
