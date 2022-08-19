@@ -1407,9 +1407,9 @@
     (?== predicate-value (get-signal out))))
 
 (test #f 0)
-(printf "\n")
+(@>> "")
 (test #t 0)
-(printf "----------\n")
+(@>> "----------")
 
 ;; FIFO, 输出信息变化为:
 ;; [0](0,1 -> 0) => [5](1,1 -> 1) => [5](1,0 -> 0)
@@ -1439,7 +1439,7 @@
           [insert-queue! (lambda (q item) ((q 'insert!) item))]
           [delete-queue! (lambda (q) (q 'delete!))])
   (test #f 0)
-  (printf "\n")
+  (@>> "")
   (test #t 1))
 
 ;; 关键点: and-gate 的 and-action-procedure 方法, 是先计算当前 output 的预期值, 再调用 after-delay 放入待处理表队列
@@ -1461,4 +1461,421 @@
 )
 
 
-(run-ex 1 ~ 32)
+;;; ex 3.33
+(ex 33
+(define (for-each-except exception procedure list)
+  (define (loop items)
+    (cond
+      [(null? items) 'done]
+      [(eq? (car items) exception) (loop (cdr items))]
+      [else
+       (procedure (car items))
+       (loop (cdr items))]))
+  (loop list))
+
+(define (inform-about-value constraint) (constraint 'I-hava-a-value))
+
+(define (inform-about-no-value constraint) (constraint 'I-lost-my-value))
+
+(define (get-name me) (if (procedure? me) (me 'type) me))
+
+(define (make-connector)
+  (let ([value #f] [informant #f] [constraints '()] [name #f])
+    (define (set-my-value newval setter)
+      ;(printf "---[00] ~a, ~a(~a) -> ~a(~a), ~a\n" name value (get-name informant) newval (get-name setter) (map get-name constraints))
+      (cond
+        [(not (has-value? me))
+         (set! value newval)
+         (set! informant setter)
+         (for-each-except setter inform-about-value constraints)]
+        [(not (= value newval)) (error 'make-connector "Contradiction: [~a] ~a -> ~a (~a)" name value newval (get-name setter))]
+        [else 'ignored]))
+    (define (forget-my-value retractor)
+      ;(printf "---[01] ~a, ~a -> ~a, ~a\n" name (get-name informant) (get-name retractor) (map get-name constraints))
+      (if (eq? retractor informant)
+          (begin
+            (set! informant #f)
+            (for-each-except retractor inform-about-no-value constraints))
+          'ignored))
+    (define (connect new-constraint)
+      (unless
+        (memq new-constraint constraints)
+        (set! constraints (cons new-constraint constraints)))
+      (when (has-value? me) (inform-about-value new-constraint))
+      'done)
+    (define (me request)
+      (cond
+        [(eq? request 'has-value?) (if informant #t #f)]
+        [(eq? request 'value) value]
+        [(eq? request 'set-value!) set-my-value]
+        [(eq? request 'forget) forget-my-value]
+        [(eq? request 'connect) connect]
+        [(eq? request 'type) 'connector]
+        [(eq? request 'name) (lambda (n) (set! name n))]
+        [(eq? request 'informant) (get-name informant)]
+        [else (error 'make-connect "Unknown request: ~a" request)]))
+    me))
+
+(define (has-value? connector) (connector 'has-value?))
+
+(define (get-value connector) (connector 'value))
+
+(define (set-value! connector new-value informant)
+  ((connector 'set-value!) new-value informant))
+
+(define (forget-value! connector retractor) ((connector 'forget) retractor))
+
+(define (connect connector new-constraint) ((connector 'connect) new-constraint))
+
+(define (adder a1 a2 sum)
+  (define (process-new-value)
+    (cond
+      [(and (has-value? a1) (has-value? a2))
+       (set-value!
+         sum
+         (+ (get-value a1) (get-value a2))
+         me)]
+      [(and (has-value? a1) (has-value? sum))
+       (set-value!
+         a2
+         (- (get-value sum) (get-value a1))
+         me)]
+      [(and (has-value? a2) (has-value? sum))
+       (set-value!
+         a1
+         (- (get-value sum) (get-value a2))
+         me)]))
+  (define (process-forget-value)
+    (forget-value! sum me)
+    (forget-value! a1 me)
+    (forget-value! a2 me)
+    (process-new-value))
+  (define (me request)
+    (cond
+      [(eq? request 'I-hava-a-value)
+       (process-new-value)]
+      [(eq? request 'I-lost-my-value)
+       (process-forget-value)]
+      [(eq? request 'type) 'adder]
+      [else (error 'adder "Unknown request: ~a" request)]))
+  (connect a1 me)
+  (connect a2 me)
+  (connect sum me)
+  me)
+
+(define (multiplier m1 m2 product)
+  (define (process-new-value)
+    (cond
+      [(or (and (has-value? m1) (= 0 (get-value m1)))
+           (and (has-value? m2) (= 0 (get-value m2))))
+       (set-value! product 0 me)]
+      [(and (has-value? m1) (has-value? m2))
+       (set-value!
+         product
+         (* (get-value m1) (get-value m2))
+         me)]
+      [(and (has-value? product) (has-value? m1))
+       (set-value!
+         m2 
+         (/ (get-value product) (get-value m1))
+         me)]
+      [(and (has-value? product) (has-value? m2))
+       (set-value!
+         m1
+         (/ (get-value product) (get-value m2))
+         me)]))
+  (define (process-forget-value)
+    (forget-value! product me)
+    (forget-value! m1 me)
+    (forget-value! m2 me)
+    (process-new-value))
+  (define (me request)
+    (cond
+      [(eq? request 'I-hava-a-value)
+       (process-new-value)]
+      [(eq? request 'I-lost-my-value)
+       (process-forget-value)]
+      [(eq? request 'type) 'multiplier]
+      [else (error 'multiplier "Unknown request: ~a" request)]))
+  (connect m1 me)
+  (connect m2 me)
+  (connect product me)
+  me)
+
+(define (constant value connector)
+  (define (me request)
+    (cond
+      [(eq? request 'type) 'constant]
+      [else (error 'constant "Unknown request: ~a" request)]))
+  (connect connector me)
+  (set-value! connector value me)
+  me)
+
+(define (cprobe name connector)
+  (define (print-probe value)
+    (printf "[P] ~a : ~a (~a)\n" name value (connector 'informant)))
+  (define (process-new-value) (print-probe (get-value connector)))
+  (define (process-forget-value) (print-probe "?"))
+  (define (me request)
+    (cond
+      [(eq? request 'I-hava-a-value)
+       (process-new-value)]
+      [(eq? request 'I-lost-my-value)
+       (process-forget-value)]
+      [(eq? request 'type) 'probe]
+      [else (error 'probe "Unknown request: ~a" request)]))
+  (connect connector me)
+  ((connector 'name) name)
+  me)
+------
+(define (averager a b c)
+  (let ([s (make-connector)] [w (make-connector)])
+    (cprobe 's s)
+    (cprobe 'w w)
+    (adder a b s)
+    (multiplier s w c)
+    (constant 0.5 w)
+    'ok))
+
+(define a (make-connector))
+(define b (make-connector))
+(define c (make-connector))
+(averager a b c)
+
+(cprobe 'a a)
+(cprobe 'b b)
+(cprobe 'c c)
+
+(set-value! a 18 'user)
+(set-value! b 26 'user)
+(?== 22.0 (get-value c))
+(forget-value! b 'user)
+(set-value! b 27 'user)
+(?== 22.5 (get-value c))
+(forget-value! a 'user)
+(set-value! c 20 'user)
+(?== 13.0 (get-value a))
+)
+
+
+;;; ex 3.34
+(ex 34
+(define (squarer a b) (multiplier a a b) 'ok)
+;; 缺陷: multiplier 的两个a参数是独立的, 当b改变时无法正常工作
+
+(define a (make-connector))
+(define b (make-connector))
+(squarer a b)
+
+(cprobe 'a a)
+(cprobe 'b b)
+
+(set-value! a 9 'user)
+(forget-value! a 'user)
+(set-value! b 100 'user)
+)
+
+
+;;; ex 3.35
+(ex 35
+(define (squarer a b)
+  (define (process-new-value)
+    (cond
+      [(has-value? b)
+       (cond
+         [(< (get-value b) 0) (error 'squarer "square less than 0: ~a" (get-value b))]
+         [else (set-value! a (sqrt (get-value b)) me)])]
+      [(has-value? a)
+       (set-value! b (sqr (get-value a)) me)]))
+  (define (process-forget-value)
+    (forget-value! a me)
+    (forget-value! b me)
+    (process-new-value))
+  (define (me request)
+    (cond
+      [(eq? request 'I-hava-a-value)
+       (process-new-value)]
+      [(eq? request 'I-lost-my-value)
+       (process-forget-value)]
+      [(eq? request 'type) 'probe]
+      [else (error 'squarer "Unknown request: ~a" request)]))
+  (connect a me)
+  (connect b me)
+  me)
+
+(define a (make-connector))
+(define b (make-connector))
+(squarer a b)
+
+(cprobe 'a a)
+(cprobe 'b b)
+
+(set-value! a 9 'user)
+(?== 81 (get-value b))
+(forget-value! a 'user)
+(set-value! b 100 'user)
+(?== 10 (get-value a))
+)
+
+
+;;; ex 3.36
+(ex 36
+;; (define a (make-connector))
+;; (define b (make-connector))
+;; (set-value! a 10 'user)
+;;
+;; [global: {a} {b} {set-value!} {inform-about-value}] `(set-value! a 10 'user)`
+;; [E1 :->global {connector => a} {new-value 10} {informant => 'user}] `((a 'set-value!) 10 'user)`
+;; [E1 :->global {connector => a} {new-value 10} {informant => 'user}] `(a 'set-value!)`
+;; [E2 :->EX1 {request => 'set-value!}] `(cond ...)`
+;; [E2 :->EX1 {request => 'set-value!}] `set-my-value`
+;; [E1 :->global {connector => a} {new-value 10} {informant => 'user}] `(set-my-value 10 'user)`
+;; [E3 :->EX2 {newval => 10} {setter => 'user}] `(cond ...)`
+;; [EX2 :-> EX3 {value => 10} {informant => 'user} {constraints => '(...)}]
+;; [E3 :->EX2 {newval => 10} {setter => 'user}] `(for-each-except 'user inform-about-value constraints)`
+)
+
+
+;;; ex 3.37
+(ex 37
+(define (celsius-fahrenheit-converter x)
+  (c+ (c* (c/ (cv 9) (cv 5))
+          x)
+      (cv 32)))
+
+(define (c+ x y)
+  (let ([z (make-connector)])
+    (adder x y z)
+    z))
+
+(define (c- x y)
+  (let ([z (make-connector)])
+    (adder y z x)
+    z))
+
+(define (c* x y)
+  (let ([z (make-connector)])
+    (multiplier x y z)
+    z))
+
+(define (c/ x y)
+  (let ([z (make-connector)])
+    (multiplier y z x)
+    z))
+
+(define (cv x)
+  (let ([z (make-connector)])
+    (constant x z)
+    z))
+
+(define C (make-connector))
+(define F (celsius-fahrenheit-converter C))
+
+(cprobe 'C C)
+(cprobe 'F F)
+
+(set-value! C 100 'user)
+(?== 212 (get-value F))
+(forget-value! C 'user)
+(set-value! F 122 'user)
+(?== 50 (get-value C))
+
+((lambda ()
+;; 一种适用性更好的表达方式
+(define (cv x)
+  (let ([z (make-connector)])
+    (constant x z)
+    z))
+
+(define ((wrap cop) x)
+  (cond
+    [(number? x) (cop x)]
+    [else x]))
+
+(define (c+ a1 a2 . w)
+  (define (helper c1 c2 . cs)
+    (let ([z (make-connector)])
+      (cond
+        [(null? cs) (adder c1 c2 z)]
+        [else (adder c1 (apply helper (cons c2 cs)) z)])
+      z))
+  (apply helper (map (wrap cv) (cons a1 (cons a2 w)))))
+
+(define (c- a . w)
+  (define (c0- x)
+    (cond
+      [(number? x) (cv (- x))]
+      [else
+       (let ([z (make-connector)])
+         (adder x z (cv 0))
+         z)]))
+  (cond
+    [(null? w) (c0- a)]
+    [else (apply c+ (cons a (map c0- w)))]))
+
+(define (c* a1 a2 . w)
+  (define (helper c1 c2 . cs)
+    (let ([z (make-connector)])
+      (cond
+        [(null? w) (multiplier c1 c2 z)]
+        [else (multiplier c1 (apply c* (cons c2 cs)) z)])
+      z))
+  (apply helper (map (wrap cv) (cons a1 (cons a2 w)))))
+
+(define (c/ a . w)
+  (define (c1/ x)
+    (cond
+      [(number? x) (cv (/ 1 x))]
+      [else
+       (let ([z (make-connector)])
+         (multiplier x z (cv 1))
+         z)]))
+  (cond
+    [(null? w) (c1/ a)]
+    [else (apply c* (cons a (map c1/ w)))]))
+
+(define (c= a1 a2)
+  (define (process-new-value)
+    (cond
+      [(has-value? a1)
+       (set-value! a2 (get-value a1) me)]
+      [(has-value? a2)
+       (set-value! a1 (get-value a2) me)]))
+  (define (process-forget-value)
+    (forget-value! a1 me)
+    (forget-value! a2 me)
+    (process-new-value))
+  (define (me request)
+    (cond
+      [(eq? request 'I-hava-a-value)
+       (process-new-value)]
+      [(eq? request 'I-lost-my-value)
+       (process-forget-value)]
+      [(eq? request 'type) 'c=]
+      [else (error 'squarer "Unknown request: ~a" request)]))
+  (connect a1 me)
+  (connect a2 me)
+  me)
+
+(@>> "----------")
+(define C (make-connector))
+(define F (make-connector))
+;; 9 * c = 5 * (F - 32)
+(c= (c* 9 C)
+    (c* 5 (c- F 32)))
+
+(cprobe 'C C)
+(cprobe 'F F)
+
+(set-value! C 100 'user)
+(?== 212 (get-value F))
+(forget-value! C 'user)
+(set-value! F 122 'user)
+(?== 50 (get-value C))
+(void)
+))
+)
+
+
+
+(run-ex 1 ~ 37)
