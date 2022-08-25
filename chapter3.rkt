@@ -1,5 +1,6 @@
 #lang sicp
 (#%require "lib/libs.rkt")
+(#%require "lib/stream.rkt")
 (#%require racket)
 
 
@@ -578,7 +579,7 @@
          [else (loop (mcdr curr) rear (append rst (list (mcar curr))))]))]))
 
 (define (print-queue queue)
-  (printf ">(~a)\n" (join (queue->list queue) " ")))
+  (printf ">(~a)\n" (string-join (map symbol->string (queue->list queue)) " ")))
 
 (define q1 (make-queue))
 (?true (empty-queue? q1))
@@ -1877,5 +1878,1163 @@
 )
 
 
+;;; ex 3.38
+(ex 38
+;; 顺序运行:
+;; - 45 peter -> paul -> mary
+;; - 35 peter -> mary -> paul
+;; - 45 paul -> peter -> mary
+;; - 50 paul -> mary -> peter
+;; - 40 mary -> peter -> paul
+;; - 40 mary -> paul -> peter
+((lambda ()
+(define balance 100)
+(define peter (lambda () (set! balance (+ balance 10))))
+(define paul (lambda () (set! balance (- balance 20))))
+(define mary (lambda () (set! balance (- balance (/ balance 2)))))
 
-(run-ex 1 ~ 37)
+(define actions (make-hash))
+(hash-set! actions 'peter (lambda () (set! balance (+ balance 10))))
+(hash-set! actions 'paul (lambda () (set! balance (- balance 20))))
+(hash-set! actions 'mary (lambda () (set! balance (- balance (/ balance 2)))))
+
+(@>> "serial")
+(for-each
+  (lambda (serial)
+    (set! balance 100)
+    (for-each (lambda (k) ((hash-ref actions k))) serial)
+    (printf "~a : ~a\n" balance (string-join (map symbol->string serial) " -> ")))
+  (arrange (hash-keys actions)))
+))
+
+;; 交错进行:
+;; peter    |   paul    |   mary
+;; <- b     | <- b      | <- b
+;; +10      | -20       | /2
+;; -> b     | -> b      | <- b
+;;          |           | -/2
+;;          |           | -> b
+((lambda ()
+(define balance 100)
+
+(define (make-serial . ss)
+  (define (helper . ss)
+    (cond
+      [(or (null? ss) (null? (cdr ss))) ss]
+      [(null? (cdr (cdr ss)))
+       (let ([lst1 (car ss)] [lst2 (cadr ss)])
+         (append
+           (map (lambda (e) (cons (car lst1) e)) (apply make-serial (list (cdr lst1) lst2)))
+           (map (lambda (e) (cons (car lst2) e)) (apply make-serial (list lst1 (cdr lst2))))))]
+      [else
+       (foldr
+         (lambda (e rst)
+           (append (apply make-serial (list (car ss) e)) rst))
+         '()
+         (apply make-serial (cdr ss)))]))
+  (apply helper (filter (lambda (e) (not (null? e))) ss)))
+
+(define (group instructs)
+  (let loop ([ins (reverse instructs)] [init #t] [rst '()])
+    (cond
+      [(null? ins) rst]
+      [else
+       (let* ([head (car ins)]
+              [new-group (memq (car head) '(loadb saveb))]
+              [new-init (if init (not new-group) #f)])
+         (cond
+           [(null? rst)
+            (loop (cdr ins) new-init (cons (list (car ins)) rst))]
+           [(or init (not new-group))
+            (loop (cdr ins) new-init (cons (cons (car ins) (car rst)) (cdr rst)))]
+           [new-group
+            (loop (cdr ins) new-init (cons (list (car ins)) rst))]))])))
+
+(define peter-instruct-groups
+  (group '((loadb ra) (add ra 10) (saveb ra))))
+
+(define paul-instruct-groups
+  (group '((loadb ra) (sub ra 20) (saveb ra))))
+
+(define mary-instruct-groups
+  (group '((loadb ra) (sar ra) (loadb rb) (sub rb ra) (saveb rb))))
+
+(define (make-account name instruct-groups verbose)
+  (define registers (make-hash '((ra . #f) (rb . #f))))
+  (define (get-reg-value reg) (hash-ref registers reg))
+  (define (set-reg-value! reg val) (hash-set! registers reg val))
+  (define (get-reg/instant-value val) (if (symbol? val) (get-reg-value val) val))
+  (define groups instruct-groups)
+  (define (run-instruct instruct)
+    (let* ([op (car instruct)] [reg (cadr instruct)])
+      (cond
+        [(eq? op 'loadb)
+         (set-reg-value! reg balance)]
+        [(eq? op 'saveb)
+         (set! balance (get-reg-value reg))]
+        [(eq? op 'add)
+         (let ([reg-value (get-reg-value reg)] [num (get-reg/instant-value (caddr instruct))])
+           (set-reg-value! reg (+ reg-value num)))]
+        [(eq? op 'sub)
+         (let ([reg-value (get-reg-value reg)] [num (get-reg/instant-value (caddr instruct))])
+           (set-reg-value! reg (- reg-value num)))]
+        [(eq? op 'sar)
+         (let ([reg-value (get-reg-value reg)])
+           (set-reg-value! reg (arithmetic-shift reg-value -1)))]))
+    (when verbose (printf "[~a] balance: ~a, regs: ~a, ins: ~a\n" name balance registers instruct)))
+  (define (dispatch m)
+    (cond
+      [(eq? m 'run)
+       (unless (null? groups)
+         (let ([first-group (car groups)])
+           (for-each run-instruct first-group)
+           (set! groups (cdr groups))))]))
+  dispatch)
+
+(define verbose #f)
+(define (make-peter) (make-account "peter" peter-instruct-groups verbose))
+(define (make-paul)  (make-account "paul " paul-instruct-groups verbose))
+(define (make-mary)  (make-account "mary " mary-instruct-groups verbose))
+
+(@>> "\ncross")
+
+(define collections '())
+(for-each
+  (lambda (steps)
+    (set! balance 100)
+    (define accounts (make-hash (list (cons 'peter (make-peter))
+                                      (cons 'paul (make-paul))
+                                      (cons 'mary (make-mary)))))
+    (for-each (lambda (step) ((hash-ref accounts step) 'run)) steps)
+    (unless (memq balance collections) (set! collections (cons balance collections))))
+  (make-serial
+    (build-list (length peter-instruct-groups) (const 'peter))
+    (build-list (length paul-instruct-groups) (const 'paul))
+    (build-list (length mary-instruct-groups) (const 'mary))))
+
+(printf "[ALL] ~a\n" collections)
+))
+)
+
+
+;;; ex 3.39
+(ex 39
+;; P1: (set! x ((s (lambda () (* x x)))))
+;; P2: (set! x (+ x 1))
+;;
+;; P1s: (readx) (read x) (* x x)
+;; P1n: (writex)
+;; P1: (P1s) (P1n)
+;; P2s: (readx) (+ x 1) (writex)
+;; P2: (P2s)
+;;
+;; 根据后文 maks-serializer 的 mutex 实现, P1s 和 P2s 之间不能交错, 但 P1 其他部分(P1n)可能在 P2s 中间执行 
+;;
+;; 121 : (P2s) (P1s) (P1n)
+;; 101 : (P1s) (P1n) (P2s: readx) (P2s: + x 1) (P2x: writex)
+;; 11  : (P1s) (P2s: readx) (P1n) (P2s: + x 1) (P2x: writex)
+;; 11  : (P1s) (P2s: readx) (P2s: + x 1) (P1n) (P2x: writex)
+;; 100 : (P1s) (P2s: readx) (P2s: + x 1) (P2x: writex) (P1n)
+)
+
+
+;;; ex 3.40
+(ex 40
+;; P1: (set! x (* x x))
+;; P2: (set! x (* x x x))
+;;
+;; P1: (readx) (readx) (* x x) (writex)
+;; P2: (readx) (readx) (readx) (* x x x) (writex)
+;;
+;; 1,000,000 : (P1) (P2) | (P2) (P1)
+;; 10,000    : (P1:readx) (P2) (P1:readx) (P1:writex)
+;; 100       : (P1:readx) (P1:readx) (P2) (P1:writex)
+;; 100,000   : (P2:readx) (P1) (P2:readx) (P2:readx) (P2:writex)
+;; 10,000    : (P2:readx) (P2:readx) (P1) (P2:readx) (P2:writex)
+;; 1,000     : (P2:readx) (P2:readx) (P2:readx) (P1) (P2:writex)
+;;
+;; 串行化之后:
+;; 1,000,000 : (P1) (P2) | (P2) (P1)
+)
+
+
+;;; ex 3.41
+(ex 41
+;; 不同意
+;; 按书中的实现方式 (lambda () balance) 仅读取balance数值并返回给用户, 此过程无法被继续拆分
+;; 不管获取时机与 withdraw 或 deposit 关系如何, 用户都能获取到当前时刻正确的 balance, 没有必要再进行串行化
+;; 相反地, 进行串行化后用户获得的信息可能不符合其预期 (延迟)
+;; 例如: 当有很多个账户同时获取 balance 时, 如果串行化则有的用户需要等待, 这是完全无必要的
+)
+
+
+;;; ex 3.42
+(ex 42
+;; 修改安全
+;; 从功能上看, 两个版本是相同的
+;; 从性能上看, 修改后的版本在大并发下所消耗的资源更少
+)
+
+
+;;; ex 3.43
+(ex 43
+;; 顺序执行的情况下, 10/20/30 进行整体交换, 且同一个账号不会被同时操作, 所以任意次并发交换后余额仍是 10/20/30
+;;
+;; (a1:10 | a2:20 | a3:30)
+;; a1 <=> a2, a1 <=> a3
+;; (a1:40 | a2:10 | a3:10) : (a1 deposit 10) (a1 deposit 20) (a2 withdraw 10) (a3 withdraw 20)
+;; 
+;; 同一账号内部进行了串行化, 每次账号的读和写操作都在一个串行队列内, 这样 withdraw 和 deposit 一定成对出现且不会交错进行
+;; 所以3个账号的余额总和保持不变
+;;
+;; (a1:10 | a2:20 | a3:30)
+;; a1 <=> a2, a1 <=> a3
+;; (a1 deposit 10) (a1 deposit 20) (a2 withdraw 10) (a3 withdraw 20)
+;; (a1 readb 10) (a1 readb 10) (a1 + 10 10) (a1 + 10 20) (a1 writeb 20) (a1 writeb 30) (a2 ...) (a3 ...)
+;; -> (a1:30 | a2:10 | a3:10) -> total:50
+)
+
+
+;;; ex 3.44
+(ex 44
+;; Louis 是错误的
+;; 转移问题和交换问题的本质区别在于:
+;;     转移中的amount是独立的, 与账号本身没有任何关系, 产生转移关系的两个账号也相互独立
+;;     交换问题中的金额是通过计算两个账号的余额差值获得的, 与账号本身有关, 产生转移关系的两个账号存在绑定关系
+;; 所以对于转移问题而言, 只要withdraw和deposit成对出现且账号本身串行化即可满足需求, 不需要关注操作的顺序
+;;
+;; 以 ex 3.43 前一问为例
+;; (a1:10 | a2:20 | a3:30)
+;; a1 <=10= a2, a1 <=10= a3
+;; (a1:40 | a2:10 | a3:10) : (a1 deposit 10) (a1 deposit 20) (a2 withdraw 10) (a3 withdraw 20)
+;; a2 和 a3 分别向 a1 转移 10, 最终结果符合预期 (实际上, 不论后续操作的顺序如何结果都保持不变)
+)
+
+
+;;; ex 3.45
+(ex 45
+;; 考虑调用 serialized-exchange 时, withdraw/deposit 过程内部实际上被同一个 balance-serializer 串行化两次
+;; 会导致程序无法运行
+)
+
+
+;;; ex 3.46
+(ex 46
+;; (if (test-and-set! cell) (the-mutex 'acquire))
+;; (define (test-and-set! cell)
+;;   (if (car cell) true (begin (set-car! cell true) false)))
+;;
+;; 假设有 (car cell) 为 #f, 有两个过程 p1, p2 同时获取 mutex
+;; (p1 (car cell) -> #f) (p2 (car cell) -> #f) (p1 (set-car! cell true) false) (p2 (set-car! cell true) false)
+)
+
+
+;;; ex 3.47
+(ex 47
+(define (make-mutex n)
+  (let ([cell (list n)])
+    (define (the-mutex m)
+      (cond
+        [(eq? m 'acquire)
+         (when (test-and-set! cell) (the-mutex 'acquire))]
+        [(eq? m 'release)
+         (clear! cell n)]))
+    the-mutex))
+
+(define (clear! cell n) (set-car! cell n))
+
+(define (test-and-set! cell)
+  (let ([cell-val (car cell)])
+    (cond
+      [(= 0 cell-val) #t]
+      [else (set-car! cell (- cell-val 1)) #f])))
+)
+
+
+;;; ex 3.48
+(ex 48
+;; Peter: a1 <=> a2, Paul: a2 <=> a1
+;; a1.code < a2.code
+;; 执行顺序: (Peter/Paul.a1) (Peter/Paul.a2)
+(define (exchange account1 account2)
+  (let ([difference (- (account1 'balance) (account2 'balance))])
+    ((account1 'withdraw) difference)
+    ((account2 'deposit) difference)))
+
+(define (serialized-exchange account1 account2)
+  (let ([flag1 (account1 'flag)] [flag2 (account2 'flag)]
+        [serializer1 (account1 'serializer)] [serializer2 (account2 'serializer)])
+    (cond
+      [(< flag1 flag2)
+       ((serializer1 (serializer2 exchange)) account1 account2)]
+      [else
+       ((serializer2 (serializer1 exchange)) account1 account2)])))
+
+(define (make-account-and-serializer balance flag)
+  (define (withdraw amount)
+    (set! balance (- balance amount))
+    balance)
+  (define (deposit amount)
+    (set! balance (+ balance amount))
+    balance)
+  (let ([balance-serializer (make-serializer)])
+    (define (dispatch m)
+      (cond
+        [(eq? m 'withdraw) withdraw]
+        [(eq? m 'deposit) deposit]
+        [(eq? m 'balance) balance]
+        [(eq? m 'serializer) balance-serializer]
+        [(eq? m 'flag) flag]))
+    dispatch))
+
+;; make-serializer 定义略
+(define (make-serializer) #f)
+)
+
+
+;;; ex 3.49
+(ex 49
+;; 参考 ex 3.48
+;; 当 a1 和 a2 的访问顺序有外部约束时, 则进程的标识编号失效
+;; 如 Peter 顺序必须 a1 -> a2
+;;    Paul  顺序必须 a2 -> a1
+)
+
+
+;;; ex 3.50
+(ex 50
+(define (stream-map proc . argstreams)
+  (if (stream-empty? (car argstreams))
+      empty-stream
+      (stream-cons
+        (apply proc (map stream-first argstreams))
+        (apply stream-map (cons proc (map stream-rest argstreams))))))
+
+(define s1 (stream 2 3))
+(define s2 (stream 4 5))
+(define s3 (stream-map * s1 s2))
+(?== 8  (stream-ref s3 0))
+(?== 15 (stream-ref s3 1))
+)
+
+
+;;; ex 3.51
+(ex 51
+;; 输出结果与具体实现方式有关
+(define empty-stream/s '())
+
+(define (stream-empty?/s s) (null? s))
+
+(define (force/s x) (x))
+
+(define (stream-cdr/s s) (force/s (cdr s)))
+
+((lambda ()
+;; 书中的实现方式
+;; (stream-cons a b) => (cons a (delay b))
+(define (stream-car/sicp s) (car s))
+
+(define (stream-ref/s s n)
+  (if (= n 0)
+      (stream-car/sicp s)
+      (stream-ref/s (stream-cdr/s s) (- n 1))))
+
+(define (stream-map/s proc . argstreams)
+  (if (stream-empty?/s (car argstreams))
+      empty-stream/s
+      (stream-cons/sicp
+        (apply proc (map stream-car/sicp argstreams))
+        (apply stream-map/s (cons proc (map stream-cdr/s argstreams))))))
+
+(define (stream-enumerate-interval/s low high)
+  (cond
+    [(> low high) empty-stream]
+    [else (stream-cons/sicp low (stream-enumerate-interval/s (+ 1 low) high))]))
+(define (show x) (printf "[~a]\n" x) x)
+
+(@>> "------ sicp ------")
+(define s1 (stream-enumerate-interval/s 0 10))
+(@>> "--- 1 ---")
+(define x (stream-map/s show s1))
+;; output: 0
+(@>> "--- 2 ---")
+(?== 5 (stream-ref/s x 5))
+;; output: (1 2 3 4 5)
+(@>> "--- 3 ---")
+(?== 7 (stream-ref/s x 7))
+;; output: (6 7)
+))
+
+((lambda ()
+;; racket 实现方式
+;; (stream-cons a b) => (cons (delay a) (delay b))
+(define (stream-car/racket s) (force/s (car s)))
+
+(define (stream-ref/s s n)
+  (if (= n 0)
+      (stream-car/racket s)
+      (stream-ref/s (stream-cdr/s s) (- n 1))))
+
+(define (stream-map/s proc . argstreams)
+  (if (stream-empty?/s (car argstreams))
+      empty-stream/s
+      (stream-cons/racket
+        (apply proc (map stream-car/racket argstreams))
+        (apply stream-map/s (cons proc (map stream-cdr/s argstreams))))))
+
+(define (stream-enumerate-interval/s low high)
+  (cond
+    [(> low high) empty-stream]
+    [else (stream-cons/racket low (stream-enumerate-interval/s (+ 1 low) high))]))
+(define (show x) (printf "[~a]\n" x) x)
+
+(@>> "------ racket ------")
+(define s1 (stream-enumerate-interval/s 0 10))
+(@>> "--- 1 ---")
+(define x (stream-map/s show s1))
+;; output: void
+(@>> "--- 2 ---")
+(?== 5 (stream-ref/s x 5))
+;; output: 5
+(@>> "--- 3 ---")
+(?== 7 (stream-ref/s x 7))
+;; output: 7
+))
+)
+
+
+;;; ex 3.52
+(ex 52
+;; 按书中的实现方式
+(define (force/s x) (x))
+
+(define empty-stream/s '())
+
+(define (stream-empty?/s s) (null? s))
+
+(define (stream-car/s s) (car s))
+
+(define (stream-cdr/s s) (force/s (cdr s)))
+
+(define (stream-ref/s s n)
+  (cond
+    [(= n 0) (stream-car/s s)]
+    [else (stream-ref/s (stream-cdr/s s) (- n 1))]))
+
+(define (display-stream/s s)
+  (cond
+    [(stream-empty?/s s) (printf "\n")]
+    [else
+     (printf "~a " (stream-car/s s))
+     (display-stream/s (stream-cdr/s s))]))
+
+((lambda ()
+(@>> "------ MEMO ------")
+
+(@alias stream-cons/s stream-cons/sicp)
+
+(define (stream-map/s proc . streams)
+  (cond
+    [(stream-empty?/s (car streams)) empty-stream/s]
+    [else
+     (stream-cons/s
+       (apply proc (map stream-car/s streams))
+       (apply stream-map/s (cons proc (map stream-cdr/s streams))))]))
+
+(define (stream-filter/s pred? s)
+  (cond
+    [(stream-empty?/s s) empty-stream/s]
+    [(pred? (stream-car/s s))
+     (stream-cons/s (stream-car/s s) (stream-filter/s pred? (stream-cdr/s s)))]
+    [else (stream-filter/s pred? (stream-cdr/s s))]))
+
+(define (stream-enumerate-interval/s low high)
+  (cond
+    [(> low high) empty-stream/s]
+    [else (stream-cons/s low (stream-enumerate-interval/s (+ low 1) high))]))
+
+(define sum 0)
+(?== 0 sum)
+
+(define (accum x)
+  (set! sum (+ x sum))
+  sum)
+(?== 0 sum)
+
+(define seq (stream-map/s accum (stream-enumerate-interval/s 1 20)))
+;; (1 3 6 10 15 21 28 36 45 55 66 78 91 105 120 136 153 171 190 210)
+;; [x=1 => sum=1] seq: (1 ...)
+(?== 1 sum)
+
+(define y (stream-filter/s even? seq))
+;; [x=2 => sum=3] seq: (1 3 ...)
+;; [x=3 => sum=6] seq: (1 3 6 ...) y: (6 ...)
+(?== 6 sum)
+
+(define z (stream-filter/s (lambda (x) (= (remainder x 5) 0)) seq))
+;; [x=4 => sum=10] seq: (1 3 6 10 ...) z: (10 ...)
+(?== 10 sum)
+
+(?== 136 (stream-ref/s y 7))
+;; (6 10 28 36 66 78 120 136 ...)
+(?== 136 sum)
+
+(display-stream/s z)
+;; (10 15 45 55 105 120 190 210)
+(?== 210 sum)
+))
+
+((lambda ()
+(@>> "------ NO-MEMO ------")
+
+(@alias stream-cons/s stream-cons/sicp/nm)
+
+(define (stream-map/s proc . streams)
+  (cond
+    [(stream-empty?/s (car streams)) empty-stream/s]
+    [else
+     (stream-cons/s
+       (apply proc (map stream-car/s streams))
+       (apply stream-map/s (cons proc (map stream-cdr/s streams))))]))
+
+(define (stream-filter/s pred? s)
+  (cond
+    [(stream-empty?/s s) empty-stream/s]
+    [(pred? (stream-car/s s))
+     (stream-cons/s (stream-car/s s) (stream-filter/s pred? (stream-cdr/s s)))]
+    [else (stream-filter/s pred? (stream-cdr/s s))]))
+
+(define (stream-enumerate-interval/s low high)
+  (cond
+    [(> low high) empty-stream/s]
+    [else (stream-cons/s low (stream-enumerate-interval/s (+ low 1) high))]))
+
+(define sum 0)
+(?== 0 sum)
+
+(define (accum x)
+  (set! sum (+ x sum))
+  sum)
+(?== 0 sum)
+
+(define seq (stream-map/s accum (stream-enumerate-interval/s 1 20)))
+;; [x=1 => sum=1] seq: (1 ...)
+(?== 1 sum)
+
+(define y (stream-filter/s even? seq))
+;; [x=2 => sum=3] seq: (1 3 ...)
+;; [x=3 => sum=6] seq: (1 3 6 ...) y: (6 ...)
+(?== 6 sum)
+
+(define z (stream-filter/s (lambda (x) (= (remainder x 5) 0)) seq))
+;; [x=2 => sum=8] seq: (1 8 ...)
+;; [x=3 => sum=11] seq: (1 8 11 ...)
+;; [x=4 => sum=15] seq: (1 8 15 ...), z: (15 ...)
+(?== 15 sum)
+
+(?== 162 (stream-ref/s y 7))
+;; 0 => seq: (1 3 6 ...), y: (6 ...)
+;; 1 => [x=4 => sum=19] y: (6 ...)
+;; 1 => [x=5 => sum=24] y: (6 24 ...)
+;; 2 => [x=6 => sum=30] y: (6 24 30 ...)
+;; 3 => [x=9 => sum=54] y: (6 24 30 54 ...)
+;; 4 => [x=10 => sum=64] y: (6 24 30 54 64 ...)
+;; 5 => [x=13 => sum=100] y: (6 24 30 54 64 100 ...)
+;; 6 => [x=14 => sum=114] y: (6 24 30 54 64 100 114 ...)
+;; 7 => [x=17 => sum=162] y: (6 24 30 54 64 100 114 162 ...)
+(?== 162 sum)
+
+(display-stream/s z)
+;; seq: (1 8 15 ...), z: (15 ...)
+;; [x=5 => sum=167]
+;; [x=6 => sum=173]
+;; [x=7 => sum=180] z: (15 180 ...)
+;; [x=12 => sum=230] z: (15 180 230 ...)
+;; [x=17 => sum=305] z: (15 180 230 305)
+;; [x=20 => sum=362]
+(?== 362 sum)
+))
+)
+
+
+;;; ex 3.53
+(ex 53
+(define (stream-take-list s n) (stream->list (stream-take s n)))
+
+(define (stream-map f . ss)
+  (cond
+    [(stream-empty? (car ss)) empty-stream]
+    [else
+     (stream-cons
+       (apply f (map stream-first ss))
+       (apply stream-map (cons f (map stream-rest ss))))]))
+
+(define (add-streams s1 s2) (stream-map + s1 s2))
+------
+(define s (stream-cons 1 (add-streams s s)))
+;; (1 2 4 8 16 ...)
+
+(?== '(1 2 4 8 16 32) (stream-take-list s 6))
+)
+
+
+;;; ex 3.54
+(ex 54
+(define ones (stream-cons 1 ones))
+
+(define integers (stream-cons 1 (add-streams integers ones)))
+
+(define (mul-streams s1 s2) (stream-map * s1 s2))
+------
+(define factorials (stream-cons 1 (mul-streams integers factorials)))
+(?== '(1 1 2 6 24 120 720) (stream-take-list factorials 7))
+)
+
+
+;;; ex 3.55
+(ex 55
+(define (partial-sums s)
+  (define sums (stream-cons (stream-first s) (add-streams sums (stream-rest s))))
+  sums)
+------
+(define (partial-sums/v2 s)
+  (define sums (add-streams s (stream-cons 0 sums)))
+  sums)
+
+(?== '(1 3 6 10 15 21) (stream-take-list (partial-sums integers) 6))
+(?== '(1 3 6 10 15 21) (stream-take-list (partial-sums/v2 integers) 6))
+)
+
+
+;;; ex 3.56
+(ex 56
+(define (scale-stream s factor)
+  (stream-map (lambda (x) (* x factor)) s))
+------
+(define (merge s1 s2)
+  (cond
+    [(stream-empty? s1) s2]
+    [(stream-empty? s2) s1]
+    [else
+     (let ([s1car (stream-first s1)] [s2car (stream-first s2)])
+       (cond
+         [(< s1car s2car)
+          (stream-cons s1car (merge (stream-rest s1) s2))]
+         [(> s1car s2car)
+          (stream-cons s2car (merge s1 (stream-rest s2)))]
+         [else
+          (stream-cons s1car (merge (stream-rest s1) (stream-rest s2)))]))]))
+
+(define S (stream-cons 1 (merge (scale-stream S 2) (merge (scale-stream S 3) (scale-stream S 5)))))
+
+(?== '(1 2 3 4 5 6 8 9 10 12 15 16 18 20) (stream-take-list S 14))
+)
+
+
+;;; ex 3.57
+(ex 57
+(define fibs (stream-cons 1 (stream-cons 1 (add-streams fibs (stream-rest fibs)))))
+;; memo: n => n => O(n)
+;; no-memo: n => fib(n) => O(c^n)
+)
+
+
+;;; ex 3.58
+(ex 58
+(define (expand num den radix)
+  (stream-cons
+    (quotient (* num radix) den)
+    (expand (remainder (* num radix) den) den radix)))
+;; 分数 num/den 转小数 0.s
+(?== '(1 4 2 8 5 7 1 4) (stream-take-list (expand 1 7 10) 8))
+(?== '(3 7 5 0 0 0) (stream-take-list (expand 3 8 10) 6))
+)
+
+
+;;; ex 3.59
+(ex 59
+(define (integrate-series s) (stream-map / s integers))
+
+(define exp-series
+  (stream-cons 1 (integrate-series exp-series)))
+
+(define cosine-series (stream-cons 1 (scale-stream (integrate-series sine-series) -1)))
+
+(define sine-series (stream-cons 0 (integrate-series cosine-series)))
+------
+(?== '(1 1 1/2 1/6 1/24 1/120) (stream-take-list exp-series 6))
+(?== '(0 1 0 -1/6 0 1/120) (stream-take-list sine-series 6))
+(?== '(1 0 -1/2 0 1/24 0) (stream-take-list cosine-series 6))
+)
+
+
+;;; ex 3.60
+(ex 60
+(define add-series add-streams)
+
+(define (mul-series s1 s2)
+  (stream-cons
+    (* (stream-first s1) (stream-first s2))
+    (add-streams
+      (add-streams
+        (scale-stream (stream-rest s1) (stream-first s2))
+        (scale-stream (stream-rest s2) (stream-first s1)))
+      (stream-cons
+        0
+        (mul-series (stream-rest s1) (stream-rest s2))))))
+------
+(define s1 (add-series (mul-series sine-series sine-series) (mul-series cosine-series cosine-series)))
+(?== '(1 0 0 0 0 0) (stream-take-list s1 6))
+)
+
+
+;;; ex 3.61
+(ex 61
+(define (reciprocal-series s)
+  (define x
+    (stream-cons 1
+      (scale-stream (mul-series (stream-rest s) x) -1)))
+  x)
+------
+(?== '(1 -1 1/2 -1/6 1/24 -1/120) (stream-take-list (reciprocal-series exp-series) 6))
+)
+
+
+;;; ex 3.62
+(ex 62
+(define (div-series s1 s2)
+  (let ([c2 (stream-first s2)])
+    (cond
+      [(= 0 c2)
+       (error 'div-series "Divided by series in which constant term is 0: ~a" (stream-take-list s2 3))]
+      [else
+       (mul-series
+         (scale-stream s1 (/ 1 c2))
+         (reciprocal-series (scale-stream s2 (/ 1 c2))))])))
+
+(define tan-series (div-series sine-series cosine-series))
+(?== '(0 1 0 1/3 0 2/15) (stream-take-list tan-series 6))
+)
+
+
+;;; ex 3.63
+(ex 63
+;; 方法中存在对 sqrt-stream 的递归调用, 每次调用时都会生成新的流, 即delay方法的memo不起作用
+;; 如果不使用memo, 则两个版本效率相同
+)
+
+
+;;; ex 3.64
+(ex 64
+(define (sqrt-stream x)
+  (define (sqrt-improve guess x) (average guess (/ x guess)))
+  (define guesses
+    (stream-cons
+      1.0
+      (stream-map
+        (lambda (guess) (sqrt-improve guess x))
+        guesses)))
+  guesses)
+
+(define (stream-limit s tolerance)
+  (cond
+    [(stream-empty? s) #f]
+    [(stream-empty? (stream-rest s)) #f]
+    [else
+     (let ([e1 (stream-first s)] [e2 (stream-first (stream-rest s))])
+       (if (< (abs (- e1 e2)) tolerance)
+           e2
+           (stream-limit (stream-rest s) tolerance)))]))
+
+(define (sqrt x tolerance)
+  (stream-limit (sqrt-stream x) tolerance))
+
+(?~= 2.0 (sqr (sqrt 2.0 1e-6)))
+)
+
+
+;;; ex 3.65
+(ex 65
+(define (summands n)
+  (stream-cons
+    (/ 1.0 n)
+    (stream-map - (summands (+ n 1)))))
+
+(define s (partial-sums (summands 1)))
+(?~= 2.0 (exp (stream-ref s 100)) 0.01)
+(?~= 2.0 (exp (stream-ref s 1000)) 0.001)
+;; 收敛很慢
+)
+
+
+;;; ex 3.66
+(ex 66
+(define (interleave s1 s2)
+  (if (stream-empty? s1)
+      s2
+      (stream-cons
+        (stream-first s1)
+        (interleave s2 (stream-rest s1)))))
+
+(define (pairs s t)
+  (stream-cons
+    (list (stream-first s) (stream-first t))
+    (interleave
+      (stream-map
+        (lambda (x) (list (stream-first s) x))
+        (stream-rest t))
+      (pairs (stream-rest s) (stream-rest t)))))
+------
+(define (pos i j)
+  (let loop ([j j] [rst (- (expt 2 i) 2)])
+    (cond
+      [(= j i) rst]
+      [(= j (+ i 1)) (loop (- j 1) (+ rst (expt 2 (- i 1))))]
+      [else (loop (- j 1) (+ rst (expt 2 i)))])))
+;; if j == i   : 2^i - 1
+;; if j == i+1 : 2^i - 1 + 2^(i-1)
+;; if j >  i+1 : 2^i - 1 + 2^(i-1) + (j-i-1)*(2^i) => (j-i)*(2^i) + 2^(i-1) - 1
+
+(define s (pairs integers integers))
+
+(?== '(1 100) (stream-ref s 197))
+(?== '(10 15) (stream-ref s (pos 10 15)))
+)
+
+
+;;; ex 3.67
+(ex 67
+(define (full-pairs s t)
+  (let ([sf (stream-first s)] [sr (stream-rest s)]
+        [tf (stream-first t)] [tr (stream-rest t)])
+    (stream-cons
+      (list sf tf)
+      (interleave
+        (stream-map (lambda (x) (list sf x)) tr)
+        (interleave
+          (stream-map (lambda (x) (list x tf)) sr)
+          (full-pairs sr tr))))))
+
+(define s (full-pairs integers integers))
+(@>> (stream-take-list s 50))
+)
+
+
+;;; ex 3.68
+(ex 68
+;; 没有第一个元素, 程序一直等待, 无法继续运行
+)
+
+
+;;; ex 3.69
+(ex 69
+(define (triples s t u)
+  (let ([s0 (stream-first s)] [sr (stream-rest s)]
+        [t0 (stream-first t)] [tr (stream-rest t)]
+        [u0 (stream-first u)] [ur (stream-rest u)])
+    (stream-cons
+      (list s0 t0 u0)
+      (interleave
+        (stream-map (lambda (x) (list s0 t0 x)) ur)
+        (interleave
+          (stream-map (lambda (x) (cons s0 x)) (pairs tr ur))
+          (triples sr tr ur))))))
+
+(define s (triples integers integers integers))
+(define b
+  (stream-filter
+    (lambda (x)
+      (let ([i (car x)] [j (cadr x)] [k (caddr x)])
+        (= (* k k) (+ (* i i) (* j j)))))
+    s))
+
+(?== '((3 4 5) (6 8 10) (5 12 13)) (stream-take-list b 3))
+)
+
+
+;;; ex 3.70
+(ex 70
+(define (merge-weighted s t weight)
+  (cond
+    [(stream-empty? s) t]
+    [(stream-empty? t) s]
+    [else
+     (let* ([s0 (stream-first s)] [t0 (stream-first t)]
+            [s0w (weight s0)] [t0w (weight t0)])
+       (cond
+         [(< s0w t0w) (stream-cons s0 (merge-weighted (stream-rest s) t weight))]
+         [else (stream-cons t0 (merge-weighted s (stream-rest t) weight))]))]))
+
+(define (weighted-pairs s t weight)
+  (let ([s0 (stream-first s)] [t0 (stream-first t)]
+        [sr (stream-rest s)] [tr (stream-rest t)])
+    (stream-cons
+      (list s0 t0)
+      (merge-weighted
+        (stream-map (lambda (x) (list s0 x)) tr)
+        (weighted-pairs sr tr weight)
+        weight))))
+------
+(define s1 (weighted-pairs integers integers (lambda (p) (+ (car p) (cadr p)))))
+(?== '((1 1) (1 2) (2 2) (1 3) (2 3) (1 4)) (stream-take-list s1 6))
+
+(define s2
+  (stream-filter
+    (lambda (x)
+      (or (= 0 (remainder x 2))
+          (= 0 (remainder x 3))
+          (= 0 (remainder x 5))))
+    integers))
+
+(define s3 (weighted-pairs s2 s2 (lambda (p) (+ (* 2 (car p)) (* 3 (cadr p)) (* 5 (car p) (cadr p))))))
+(?== '((2 2) (2 3) (2 4) (3 3) (2 5) (3 4)) (stream-take-list s3 6))
+)
+
+
+;;; ex 3.71
+(ex 71
+(define (weight p)
+  (let ([i (car p)] [j (cadr p)])
+    (+ (* i i i) (* j j j))))
+
+(define (make-ramanujans)
+  (define s1 (weighted-pairs integers integers weight))
+  (define s2 (stream-map weight s1))
+  (stream-map
+    car
+    (stream-filter
+      (lambda (p) (= (car p) (cadr p)))
+      (stream-map list s2 (stream-rest s2)))))
+
+(define s (make-ramanujans))
+(?== '(1729 4104 13832 20683 32832 39312) (stream-take-list s 6))
+)
+
+
+;;; ex 3.72
+(ex 72
+(define (weight p)
+  (let ([i (car p)] [j (cadr p)])
+    (+ (* i i) (* j j))))
+
+(define s1 (weighted-pairs integers integers weight))
+
+(define s2 (stream-map list s1 (stream-rest s1) (stream-rest (stream-rest s1))))
+
+(define s3
+  (stream-filter
+    (lambda (p)
+      (let ([p0 (car p)] [p1 (cadr p)] [p2 (caddr p)])
+        (= (weight p0) (weight p1) (weight p2))))
+    s2))
+
+(define (print s n)
+  (let ([x (stream-ref s n)])
+    (printf "[~a] ~a\n" (weight (car x)) x)))
+
+(print s3 0)
+(print s3 1)
+(print s3 2)
+)
+
+
+;;; ex 3.73
+(ex 73
+(define (integral integrand initial-value dt)
+  (define int
+    (stream-cons initial-value
+      (add-streams
+        (scale-stream integrand dt)
+        int)))
+  int)
+
+(define ((RC r c dt) i v0)
+  (add-streams
+    (scale-stream i r)
+    (integral (scale-stream i (/ 1.0 c)) v0 dt)))
+
+(define RC1 (RC 5 1 0.5))
+
+(define i (stream-map (lambda (ti) (sin (* pi ti 0.01))) integers))
+
+(define v (RC1 i 0))
+)
+
+
+;;; ex 3.74
+(ex 74
+(define (sign-change-detector cv lv)
+  (cond
+    [(and (< lv 0) (>= cv 0)) 1]
+    [(and (>= lv 0) (< cv 0)) -1]
+    [else 0]))
+------
+(define sense-data (stream 1 2 1.5 1 0.5 -0.1 -2 -3 -2 -0.5 0.2 3 4 0 0 0))
+
+(define zero-crossings
+  (stream-map sign-change-detector sense-data (stream-cons 0 sense-data)))
+
+(?== '(0 0 0 0 0 -1 0 0 0 0 1 0) (stream-take-list zero-crossings 12))
+)
+
+
+;;; ex 3.75
+(ex 75
+(define (make-zero-crossings input-stream last-value last-avpt)
+  (let ([avpt (/ (+ (stream-first input-stream) last-value) 2)])
+    (stream-cons
+      (sign-change-detector avpt last-avpt)
+      (make-zero-crossings (stream-rest input-stream) (stream-first input-stream) avpt))))
+)
+
+
+;;; ex 3.76
+(ex 76
+(define (smooth s)
+  (stream-map average s (stream-rest s)))
+
+(define (make-zero-crossings input-stream last-value smooth)
+  (let ([smoothed-stream (smooth input-stream)])
+    (stream-map
+      sign-change-detector
+      smoothed-stream
+      (stream-cons last-value smoothed-stream))))
+)
+
+
+;;; ex 3.77
+(ex 77
+(define (integral delayed-integrand initial-value dt)
+  (stream-cons
+    initial-value
+    (let ([integrand (force delayed-integrand)])
+      (if (stream-empty? integrand)
+          empty-stream
+          (integral
+            (delay (stream-rest integrand))
+            (+ (* dt (stream-first integrand)) initial-value)
+            dt)))))
+
+(define (solve f y0 dt)
+  (define y (integral (delay dy) y0 dt))
+  (define dy (stream-map f y))
+  y)
+
+(@>> (stream-ref (solve (lambda (y) y) 1 0.001) 1000))
+)
+
+
+;;; ex 3.78
+(ex 78
+(define (integral delayed-integrand initial-value dt)
+  (define int
+    (stream-cons
+      initial-value
+      (let ([integrand (force delayed-integrand)])
+        (add-streams (scale-stream integrand dt) int))))
+  int)
+------
+(define (solve-2nd a b dt y0 dy0)
+  (define y (integral (delay dy) y0 dt))
+  (define dy (integral (delay ddy) dy0 dt))
+  (define ddy
+    (add-streams
+      (scale-stream dy a)
+      (scale-stream y b)))
+  y)
+
+(?~= 2.7181459 (stream-ref (solve-2nd 1 0 0.0001 1 1) 10000))
+)
+
+
+;;; ex 3.79
+(ex 79
+(define (solve-2nd f y0 dy0 dt)
+  (define y (integral (delay dy) y0 dt))
+  (define dy (integral (delay ddy) dy0 dt))
+  (define ddy (stream-map f dy y))
+  y)
+
+(?~= 2.7181459 (stream-ref (solve-2nd (lambda (dy y) dy) 1 1 0.0001) 10000))
+)
+
+
+;;; ex 3.80
+(ex 80
+(define ((RLC R L C dt) vc0 il0)
+  (define vc (integral (delay dvc) vc0 dt))
+  (define il (integral (delay dil) il0 dt))
+  (define dvc (scale-stream il (/ -1.0 C)))
+  (define dil
+    (add-streams
+      (scale-stream vc (/ 1.0 L))
+      (scale-stream il (/ (- R) L))))
+  (cons vc il))
+
+(define RLC1 (RLC 1 1 0.2 0.1))
+(define pair (RLC1 10 0))
+
+(@>> (stream-take-list (car pair) 10))
+(@>> (stream-take-list (cdr pair) 10))
+)
+
+
+;;; ex 3.81
+(ex 81
+(define (rand-update x) (modulo (+ (* 17 x) 43) 100))
+
+(define (rand-generate ops initial)
+  (define rands
+    (stream-cons
+      initial
+      (stream-map
+        (lambda (op n)
+          (let ([m (car op)])
+            (cond
+              [(eq? m 'g) (rand-update n)]
+              [(eq? m 'r) (cadr op)])))
+        ops
+        rands)))
+  rands)
+
+(define ops (stream '(g) '(g) '(g) '(r 1) '(g) '(r 2) '(g) '(g)))
+(?== '(0 43 74 1 1 60 2 77 52) (stream-take-list (rand-generate ops 0) 9))
+)
+
+
+;;; ex 3.82
+(ex 82
+(define (monte-carlo experiment-stream passed failed)
+  (define (next passed failed)
+    (stream-cons
+      (/ passed (+ passed failed))
+      (monte-carlo (stream-rest experiment-stream) passed failed)))
+  (if (stream-first experiment-stream)
+      (next (+ passed 1) failed)
+      (next passed (+ failed 1))))
+
+(define (estimate-integral pred? x1 x2 y1 y2)
+  (define MAX 1000)
+  (define (coord n low high)
+    (+ low (* n (- high low) (/ 1.0 MAX))))
+  (define (make-random-pairs)
+    (stream-cons
+      (cons (random MAX) (random MAX))
+      (make-random-pairs)))
+  (monte-carlo
+    (stream-map
+      (lambda (p)
+        (let ([x (coord (car p) x1 x2)] [y (coord (cdr p) y1 y2)])
+          (pred? x y)))
+      (make-random-pairs))
+    0 0))
+
+(define (in-cycle x y) (<= (+ (* x x) (* y y)) 1))
+
+(define pi (scale-stream (estimate-integral in-cycle -1 1 -1 1) 4.0))
+
+(?~= 3.14 (stream-ref pi 100000) 0.01)
+)
+
+
+(run-ex 1 ~ 82)

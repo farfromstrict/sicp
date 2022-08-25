@@ -1,5 +1,5 @@
 #lang racket
-(provide average int/list join diff-ratio mlist list->mlist repeat)
+(provide average int/list diff-ratio mlist list->mlist repeat arrange)
 
 (define (average e . w)
   (let ([sum (+ e (apply + w))]
@@ -11,15 +11,6 @@
     (if (> n high)
         (reverse rst)
         (loop (+ n step) (cons n rst)))))
-
-(define (join lst delim)
-  (cond
-    [(null? lst) ""]
-    [else
-     (let loop ([lst (cdr lst)] [rst (format "~a" (car lst))])
-       (cond
-         [(null? lst) rst]
-         [else (loop (cdr lst) (format "~a~a~a" rst delim (car lst)))]))]))
 
 (define (diff-ratio v1 v2)
   (let ([sum (+ v1 v2)])
@@ -45,3 +36,15 @@
   (let loop ([t n])
     (cond
       [(> t 0) (proc) (loop (- t 1))])))
+
+(define (arrange lst)
+  (cond
+    [(null? lst) '()]
+    [(null? (cdr lst)) (list lst)]
+    [else
+     (foldr
+       (lambda (x rst)
+         (let ([rest (filter (lambda (y) (not (eq? x y))) lst)])
+           (append (map (lambda (z) (cons x z)) (arrange rest)) rst)))
+       '()
+       lst)]))

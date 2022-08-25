@@ -1,7 +1,7 @@
 #lang racket
 (require (for-syntax racket/syntax syntax/parse))
 
-(provide ex run-ex @>> @update @update! @catch)
+(provide ex run-ex @>> @update @update! @catch @alias)
 
 (define-syntax (ex stx)
   (syntax-parse stx
@@ -90,3 +90,6 @@
     [(_ body ...)
      #'(with-handlers ([(const #t) exn-message]) body ... (void))]
     [_ #'(void)]))
+
+(define-syntax-rule (@alias new-id old-id)
+  (define-syntax new-id (make-rename-transformer #'old-id)))
