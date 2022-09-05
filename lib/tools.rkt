@@ -1,5 +1,5 @@
 #lang racket
-(provide average int/list diff-ratio mlist list->mlist repeat arrange)
+(provide average int/list diff-ratio mlist mlist->list list->mlist list->mlist-rec repeat arrange)
 
 (define (average e . w)
   (let ([sum (+ e (apply + w))]
@@ -23,9 +23,20 @@
     [(null? w) w]
     [else (mcons (car w) (apply mlist (cdr w)))]))
 
+(define (mlist->list mlst)
+  (cond
+    [(null? mlst) '()]
+    [else (cons (mcar mlst) (mlist->list (mcdr mlst)))]))
+
 (define (list->mlist lst)
   (cond
-    [(null? lst) lst]
+    [(or (null? lst) (mpair? lst)) lst]
+    [else
+     (mcons (car lst) (list->mlist (cdr lst)))]))
+
+(define (list->mlist-rec lst)
+  (cond
+    [(or (null? lst) (mpair? lst)) lst]
     [else
      (let ([head (car lst)])
        (cond
