@@ -371,12 +371,12 @@
 (define z1 (mcons x x))
 (define z2 (mcons (mlist 'a 'b) (mlist 'a 'b)))
 
-(?== (list->mlist '((wow b) wow b)) (set-to-wow! z1))
+(?== (list->mlist-rec '((wow b) wow b)) (set-to-wow! z1))
 ;; x  --> [wow|.] --> [b|/]
 ;;         ^ ^
 ;;         | |
 ;; z1 --> [.|.]
-(?== (list->mlist '((wow b) a b)) (set-to-wow! z2))
+(?== (list->mlist-rec '((wow b) a b)) (set-to-wow! z2))
 ;;        [wow|.] --> [b|/]
 ;;         ^
 ;;         |
@@ -3033,7 +3033,7 @@
 
 (define pi (scale-stream (estimate-integral in-cycle -1 1 -1 1) 4.0))
 
-(?~= 3.14 (stream-ref pi 100000) 0.01)
+(?~= 3.14 (stream-ref pi 1000000) 0.01)
 )
 
 

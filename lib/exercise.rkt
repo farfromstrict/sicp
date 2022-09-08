@@ -4,58 +4,104 @@
 (provide ex run-ex @>> @update @update! @catch @alias)
 
 (define-syntax (ex stx)
+  (define (define? exp)
+    (let ([lst (syntax-e exp)])
+      (cond
+        [(pair? lst) (eq? 'define (syntax->datum (car lst)))]
+        [else #f])))
+  (define (split exp)
+    (syntax-case exp (define)
+      [(define ((id ps1 ...) ps2 ...) body ...)
+       (cons #'id #`(lambda (ps1 ...) (lambda (ps2 ...) body ...)))]
+      [(define (id params ...) body ...)
+       (cons #'id #`(lambda (params ...) body ...))]
+      [(define (id ps1 ... . ps2) body ...)
+       (cons #'id #`(lambda (ps1 ... . ps2) body ...))]
+      [(define id val) (cons #'id #'val)]))
+  (define (scan-defines exps)
+    (let loop ([exps exps] [defs '()] [no-defs '()])
+      (cond
+        [(null? exps)
+         (cond
+           [(null? defs) (cons defs no-defs)]
+           [else (cons (map split defs) no-defs)])]
+        [(define? (car exps)) (loop (cdr exps) `(,@defs ,(car exps)) no-defs)]
+        [else (loop (cdr exps) defs `(,@no-defs ,(car exps)))])))
   (syntax-parse stx
-    [(_ ex-id outer-expr ... (~literal ------) inner-expr ...)
-     (with-syntax ([name (format-id #'ex-id "ex-~a" (syntax->datum #'ex-id))])
-       #'(begin
-            outer-expr ...
-            (define (name)
-              (printf "---------- ex ~a ----------\n" ex-id)
-              (let () inner-expr ... (void))
-              (printf "---------------------------\n\n"))))]
+    [(_ ex-id outter-expr ... (~literal ------) inner-expr ...)
+     (with-syntax ([outter-name (format-id #'ex-id "outter-ex-~a" (syntax->datum #'ex-id))]
+                   [inner-name  (format-id #'ex-id "inner-ex-~a"  (syntax->datum #'ex-id))])
+       (let ([exps-pair (scan-defines (syntax->list #'(outter-expr ...)))])
+         (let ([defs (car exps-pair)] [no-defs (cdr exps-pair)])
+           (cond
+             [(null? defs)
+              #`(begin
+                  (define (outter-name) #,@no-defs (void))
+                  (define (inner-name)
+                    (printf "---------- ex ~a ----------\n" ex-id)
+                    (let () inner-expr ... (void))
+                    (printf "---------------------------\n\n")))]
+             [else
+              #`(begin
+                  #,@(map (lambda (def) #`(define #,(car def) '*unassigned*)) defs)
+                  (define (outter-name)
+                    #,@(map (lambda (def) #`(set! #,(car def) #,(cdr def))) defs)
+                    #,@no-defs
+                    (void))
+                  (define (inner-name)
+                    (printf "---------- ex ~a ----------\n" ex-id)
+                    (let () inner-expr ... (void))
+                    (printf "---------------------------\n\n")))]))))]
     [(_ ex-id expr ...)
-     (with-syntax ([name (format-id #'ex-id "ex-~a" (syntax->datum #'ex-id))])
-       #'(define (name)
-           (printf "---------- ex ~a ----------\n" ex-id)
-           (let () expr ... (void))
-           (printf "---------------------------\n\n")))]
+     (with-syntax ([outter-name (format-id #'ex-id "outter-ex-~a" (syntax->datum #'ex-id))]
+                   [inner-name  (format-id #'ex-id "inner-ex-~a"  (syntax->datum #'ex-id))])
+       #'(begin
+           (define (outter-name) (void))
+           (define (inner-name)
+             (printf "---------- ex ~a ----------\n" ex-id)
+             (let () expr ... (void))
+             (printf "---------------------------\n\n"))))]
     [_ #'(void)]))
 
 (define-syntax (run-ex stx)
+  (define (max lst)
+    (let loop ([lst (cdr lst)] [rst (car lst)])
+      (cond
+        [(null? lst) rst]
+        [(> (car lst) rst) (loop (cdr lst) (car lst))]
+        [else (loop (cdr lst) rst)])))
   (define (id-list start end)
-    (if (> start end)
-        '()
-        (cons start (id-list (+ start 1) end))))
-  (define (run id)
-    (with-syntax ([name (format-id stx "ex-~a" id)])
-      #'(name)))
-  (define (run-list ids)
+    (if (> start end) '() (cons start (id-list (+ start 1) end))))
+  (define (run id active)
+    (with-syntax ([outter-name (format-id stx "outter-ex-~a" id)]
+                  [inner-name (format-id stx "inner-ex-~a" id)])
+      (let ([outter-ok (identifier-binding #'outter-name)] [inner-ok (identifier-binding #'inner-name)])
+        (if active
+            #`(begin #,(if outter-ok #'(outter-name) #'(void)) #,(if inner-ok #'(inner-name) #'(void)))
+            (if outter-ok #'(outter-name) #'(void))))))
+  (define (run-list pairs)
     #`(begin
-        #,@(for/list ([id ids])
-             (run id))))
+        #,@(for/list ([pair pairs])
+             (run (car pair) (cdr pair)))))
   (define (exclude lst1 lst2)
-    (filter (lambda (e) (not (member e lst2))) lst1))
+    (map
+      (lambda (id) (cons id (and (member id lst1) (not (member id lst2)))))
+      (id-list 1 (max lst1))))
   (syntax-parse stx
-    [(_ ex-id-start (~literal ~) ex-id-end (~literal but) n-ex-id-start (~literal ~) n-ex-id-end)
-     (run-list
-       (exclude
-         (id-list (syntax->datum #'ex-id-start)
-                  (syntax->datum #'ex-id-end))
-         (id-list (syntax->datum #'n-ex-id-start)
-                  (syntax->datum #'n-ex-id-end))))]
-    [(_ ex-id-start (~literal ~) ex-id-end (~literal but) n-ex-id ...)
-     (run-list
-       (exclude
-         (id-list (syntax->datum #'ex-id-start)
-                  (syntax->datum #'ex-id-end))
-         (map syntax->datum (syntax->list #'(n-ex-id ...)))))]
-    [(_ ex-id-start (~literal ~) ex-id-end)
-     (run-list
-       (id-list (syntax->datum #'ex-id-start)
-                (syntax->datum #'ex-id-end)))]
-    [(_ ex-id ...)
-     (run-list
-       (map syntax->datum (syntax->list #'(ex-id ...))))]
+    [(_ id-start (~literal ~) id-end (~literal but) n-id-start (~literal ~) n-id-end)
+     (let ([lst  (id-list (syntax->datum #'id-start)   (syntax->datum #'id-end))]
+           [nlst (id-list (syntax->datum #'n-id-start) (syntax->datum #'n-id-end))])
+       (run-list (exclude lst nlst)))]
+    [(_ id-start (~literal ~) id-end (~literal but) n-id ...)
+     (let ([lst  (id-list (syntax->datum #'id-start) (syntax->datum #'id-end))]
+           [nlst (map syntax->datum (syntax->list #'(n-id ...)))])
+       (run-list (exclude lst nlst)))]
+    [(_ id-start (~literal ~) id-end)
+     (let ([lst (id-list (syntax->datum #'id-start) (syntax->datum #'id-end))])
+       (run-list (exclude lst '())))]
+    [(_ id ...)
+     (let ([lst (map syntax->datum (syntax->list #'(id ...)))])
+       (run-list (exclude lst '())))]
     [_ #'(void)]))
 
 (define-syntax (@>> stx)
